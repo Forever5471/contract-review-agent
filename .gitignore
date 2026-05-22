@@ -1,0 +1,15 @@
+.env
+.env.local
+__pycache__/
+*.pyc
+.tmp-python-deps/
+data/store.json
+uploads/*
+!data/.gitkeep
+!uploads/.gitkeep
+server.log
+server.err.log
+server.out.current.log
+server.err.current.log
+uvicorn.out.log
+uvicorn.err.log

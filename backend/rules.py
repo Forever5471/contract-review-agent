@@ -1,0 +1,78 @@
+from __future__ import annotations
+
+
+RULES = [
+    {
+        "id": "SL-GEN-003",
+        "name": "首页与签章页主体完整性",
+        "mode": "脚本模式",
+        "priority": "P2",
+        "risk_level": "一般风险",
+        "scope": ["通用规则"],
+        "description": "合同应出现双方主体信息，并在签章/签字处体现。",
+    },
+    {
+        "id": "SL-GEN-004",
+        "name": "我方主体名称与角色一致性",
+        "mode": "脚本模式",
+        "priority": "P1",
+        "risk_level": "高风险",
+        "scope": ["通用规则"],
+        "description": "识别我方主体是否为盛龙矿业或相关主体。",
+    },
+    {
+        "id": "SL-GEN-010",
+        "name": "付款方式和付款条件完整性",
+        "mode": "指令模式",
+        "priority": "P1",
+        "risk_level": "高风险",
+        "scope": ["通用规则", "财务规则"],
+        "description": "合同应明确付款方式、节点、条件、发票要求。",
+    },
+    {
+        "id": "SL-GEN-012",
+        "name": "付款不得早于合同生效/审批",
+        "mode": "脚本模式",
+        "priority": "P0",
+        "risk_level": "重大风险",
+        "scope": ["通用规则", "财务规则"],
+        "description": "识别生效前付款、审批前履行等重大风险。",
+    },
+    {
+        "id": "SL-GEN-014",
+        "name": "签章与生效条款校验",
+        "mode": "脚本模式",
+        "priority": "P1",
+        "risk_level": "高风险",
+        "scope": ["通用规则", "用印规则"],
+        "description": "合同应明确签字盖章后生效。",
+    },
+    {
+        "id": "SL-ROLE-OFFICE-001",
+        "name": "一般/重要合同流程识别",
+        "mode": "脚本模式",
+        "priority": "P2",
+        "risk_level": "高风险",
+        "scope": ["角色规则", "归口管理"],
+        "description": "根据金额识别一般合同、重要合同和会议评审要求。",
+    },
+    {
+        "id": "SL-TYPE-ENG-002",
+        "name": "工程安全管理协议触发",
+        "mode": "脚本模式",
+        "priority": "P0",
+        "risk_level": "重大风险",
+        "scope": ["合同类型规则", "安全环保"],
+        "description": "工程、施工、外包类合同应关联安全管理协议。",
+    },
+    {
+        "id": "SL-ROLE-LEGAL-002",
+        "name": "违约责任具体量化",
+        "mode": "指令模式",
+        "priority": "P1",
+        "risk_level": "高风险",
+        "scope": ["角色规则", "法务规则"],
+        "description": "违约情形、违约金、解除权、损失范围应具体明确。",
+    },
+]
+

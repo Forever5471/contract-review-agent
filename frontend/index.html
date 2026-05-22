@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>合同智审 Agent MVP</title>
+  <link rel="stylesheet" href="/styles.css?v=20260521-15" />
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <div>
+        <h1>合同智审 Agent MVP</h1>
+        <p>轻交互、重 Skill：合同入库后自动进入 Agent Loop 审核链路</p>
+      </div>
+      <button id="refreshBtn" class="ghost-btn">刷新</button>
+    </header>
+
+    <section class="stats-bar" aria-label="合同审核数据统计">
+      <article class="stat-card">
+        <span class="stat-icon stat-icon-blue">总</span>
+        <div><b>总合同</b><strong id="statTotal">0</strong></div>
+      </article>
+      <article class="stat-card">
+        <span class="stat-icon stat-icon-green">过</span>
+        <div><b>通过合同</b><strong id="statPassed">0</strong></div>
+      </article>
+      <article class="stat-card">
+        <span class="stat-icon stat-icon-red">审</span>
+        <div><b>待确认合同</b><strong id="statNeedConfirm">0</strong></div>
+      </article>
+      <article class="stat-card stat-card-wide">
+        <div class="risk-stat-lines">
+          <span><i class="dot dot-red"></i>高风险规则 <b id="statHighRisk">0</b></span>
+          <span><i class="dot dot-orange"></i>一般风险规则 <b id="statGeneralRisk">0</b></span>
+        </div>
+        <strong id="statTotalRisk">0</strong>
+      </article>
+    </section>
+
+    <main class="workspace">
+      <aside class="panel left-panel">
+        <section class="upload-box" id="dropZone">
+          <div class="upload-icon">上传</div>
+          <h2>合同上传区域</h2>
+          <p>支持 Word、PDF、TXT、MD。上传后自动进入审核链路。</p>
+          <input id="fileInput" type="file" accept=".doc,.docx,.pdf,.txt,.md" hidden />
+          <button id="uploadBtn" class="primary-btn">选择合同</button>
+        </section>
+
+        <section class="meta-form">
+          <label>
+            经办部门
+            <input id="businessDept" placeholder="如：采购部、工程部" />
+          </label>
+          <label>
+            经办人
+            <input id="initiator" placeholder="如：张三" />
+          </label>
+        </section>
+
+        <section class="contract-list-section">
+          <div class="section-title">
+            <h2>合同库</h2>
+            <span id="contractCount">0</span>
+          </div>
+          <div class="contract-list-tabs" role="tablist" aria-label="合同办理状态">
+            <button class="contract-list-tab active" type="button" data-contract-tab="todo">
+              待办 <span id="todoCount">0</span>
+            </button>
+            <button class="contract-list-tab" type="button" data-contract-tab="done">
+              已办 <span id="doneCount">0</span>
+            </button>
+          </div>
+          <div id="contractList" class="contract-list"></div>
+        </section>
+      </aside>
+
+      <section class="panel preview-panel">
+        <div class="preview-header">
+          <div>
+            <h2 id="previewTitle">请选择一份合同</h2>
+            <p id="previewSub">中间区域用于展示合同解析预览、基础字段和模板匹配结果。</p>
+          </div>
+          <button id="rerunBtn" class="ghost-btn" disabled>重新审核</button>
+        </div>
+
+        <div id="emptyPreview" class="empty-state">
+          <strong>暂无选中合同</strong>
+          <span>从左侧上传或选择合同后，这里会展示合同预览。</span>
+        </div>
+
+        <div id="previewContent" class="preview-content hidden">
+          <div class="info-grid">
+            <div><b>合同类型</b><span id="contractType">-</span></div>
+            <div><b>审核状态</b><span id="reviewStatus">-</span></div>
+            <div><b>最大金额</b><span id="maxAmount">-</span></div>
+            <div><b>模板匹配度</b><span id="templateScore">-</span></div>
+          </div>
+
+          <div class="preview-tabs">
+            <button class="tab-btn active" data-tab="text">合同预览</button>
+            <button class="tab-btn" data-tab="fields">抽取字段</button>
+            <button class="tab-btn" data-tab="template">模板匹配</button>
+          </div>
+
+          <pre id="textTab" class="tab-panel contract-text"></pre>
+          <div id="fieldsTab" class="tab-panel hidden"></div>
+          <div id="templateTab" class="tab-panel hidden"></div>
+        </div>
+      </section>
+
+      <aside class="panel right-panel">
+        <div class="section-title">
+          <h2>Agent 审核过程</h2>
+          <span id="agentPromptVersion">-</span>
+        </div>
+        <div id="timeline" class="timeline"></div>
+
+        <div class="section-title result-title">
+          <h2>审查结果</h2>
+          <span id="riskTotal">0</span>
+        </div>
+        <div id="resultTabs" class="result-tabs hidden"></div>
+        <div id="resultSummary" class="result-summary empty-state">
+          <strong>等待审核结果</strong>
+          <span>Agent Loop 完成后会在这里展示结论、风险和建议。</span>
+        </div>
+        <div id="riskList" class="risk-list"></div>
+      </aside>
+    </main>
+  </div>
+
+  <script src="/app.js?v=20260521-15"></script>
+</body>
+</html>
