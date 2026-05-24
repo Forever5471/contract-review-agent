@@ -15,6 +15,11 @@ const state = {
   flowStrategies: [],
   flowReviewStrategies: [],
   flowRules: [],
+  knowledge: null,
+  knowledgeItems: [],
+  knowledgeSearchResults: [],
+  selectedKnowledgeCategory: "全部",
+  knowledgeQuery: "",
   ruleStats: null,
   selectedId: null,
   selectedRuleId: null,
@@ -39,6 +44,7 @@ const $ = (selector) => document.querySelector(selector);
 
 const els = {
   uploadBtn: $("#uploadBtn"),
+  knowledgeBtn: $("#knowledgeBtn"),
   agentsBtn: $("#agentsBtn"),
   flowStrategiesBtn: $("#flowStrategiesBtn"),
   strategiesBtn: $("#strategiesBtn"),
@@ -77,6 +83,17 @@ const els = {
   statHighRisk: $("#statHighRisk"),
   statGeneralRisk: $("#statGeneralRisk"),
   statTotalRisk: $("#statTotalRisk"),
+  knowledgeModal: $("#knowledgeModal"),
+  closeKnowledgeBtn: $("#closeKnowledgeBtn"),
+  refreshKnowledgeBtn: $("#refreshKnowledgeBtn"),
+  knowledgeCount: $("#knowledgeCount"),
+  knowledgeRoot: $("#knowledgeRoot"),
+  knowledgeCategories: $("#knowledgeCategories"),
+  knowledgeSearchInput: $("#knowledgeSearchInput"),
+  knowledgeSearchBtn: $("#knowledgeSearchBtn"),
+  knowledgeClearSearchBtn: $("#knowledgeClearSearchBtn"),
+  knowledgeStats: $("#knowledgeStats"),
+  knowledgeList: $("#knowledgeList"),
   rulesModal: $("#rulesModal"),
   closeRulesBtn: $("#closeRulesBtn"),
   newRuleBtn: $("#newRuleBtn"),
@@ -237,6 +254,141 @@ function renderStats() {
   els.statHighRisk.textContent = highRisk;
   els.statGeneralRisk.textContent = generalRisk;
   els.statTotalRisk.textContent = totalRisk;
+}
+
+async function openKnowledgeModal() {
+  els.knowledgeModal.classList.remove("hidden");
+  await loadKnowledge();
+}
+
+async function loadKnowledge(refresh = false) {
+  const data = await api(`/api/knowledge${refresh ? "?refresh=true" : ""}`);
+  state.knowledge = data;
+  state.knowledgeItems = data.items || [];
+  if (!state.selectedKnowledgeCategory) state.selectedKnowledgeCategory = "全部";
+  renderKnowledge();
+}
+
+async function searchKnowledge() {
+  const query = els.knowledgeSearchInput.value.trim();
+  state.knowledgeQuery = query;
+  if (!query) {
+    state.knowledgeSearchResults = [];
+    renderKnowledge();
+    return;
+  }
+  const data = await api(`/api/knowledge/search?q=${encodeURIComponent(query)}&top_k=10`);
+  state.knowledgeSearchResults = data.items || [];
+  renderKnowledgeSearchStats(data);
+  renderKnowledgeList();
+}
+
+function renderKnowledge() {
+  const items = state.knowledgeItems || [];
+  els.knowledgeCount.textContent = items.length;
+  els.knowledgeRoot.innerHTML = `
+    <b>索引根目录</b>
+    <span>${escapeHtml(state.knowledge?.workspace_root || "-")}</span>
+  `;
+  renderKnowledgeCategories();
+  renderKnowledgeSearchStats();
+  renderKnowledgeList();
+}
+
+function renderKnowledgeCategories() {
+  const categories = state.knowledge?.categories || [];
+  const totalChunks = state.knowledge?.chunk_count || 0;
+  const categoryButtons = [
+    { name: "全部", documents: state.knowledgeItems.length, chunks: totalChunks, exists: true },
+    ...categories,
+  ];
+  els.knowledgeCategories.innerHTML = categoryButtons.map((category) => `
+    <button class="knowledge-category ${state.selectedKnowledgeCategory === category.name ? "active" : ""}" type="button" data-knowledge-category="${escapeHtml(category.name)}">
+      <span>
+        <b>${escapeHtml(category.name)}</b>
+        <small>${category.exists ? "可用" : "目录未创建"}</small>
+      </span>
+      <em>${category.documents || 0} 文档 · ${category.chunks || 0} 片段</em>
+    </button>
+  `).join("");
+  els.knowledgeCategories.querySelectorAll("[data-knowledge-category]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.selectedKnowledgeCategory = button.dataset.knowledgeCategory || "全部";
+      state.knowledgeQuery = "";
+      state.knowledgeSearchResults = [];
+      els.knowledgeSearchInput.value = "";
+      renderKnowledge();
+    });
+  });
+}
+
+function renderKnowledgeSearchStats(data = null) {
+  const activeCategory = state.selectedKnowledgeCategory || "全部";
+  const query = state.knowledgeQuery;
+  const confidence = data?.confidence ?? null;
+  const warning = (data?.warnings || [])[0] || "";
+  els.knowledgeStats.innerHTML = `
+    <span>当前分类：<b>${escapeHtml(activeCategory)}</b></span>
+    <span>索引片段：<b>${state.knowledge?.chunk_count || 0}</b></span>
+    ${query ? `<span>检索词：<b>${escapeHtml(query)}</b></span>` : ""}
+    ${confidence !== null ? `<span>置信度：<b>${Math.round(confidence * 100)}%</b></span>` : ""}
+    ${warning ? `<span class="knowledge-warning">${escapeHtml(warning)}</span>` : ""}
+  `;
+}
+
+function renderKnowledgeList() {
+  const query = state.knowledgeQuery;
+  const items = query ? filterKnowledgeSearchResults() : filterKnowledgeItems();
+  if (!items.length) {
+    els.knowledgeList.innerHTML = `
+      <div class="empty-state compact-empty">
+        <strong>${query ? "未检索到知识片段" : "暂无知识文档"}</strong>
+        <span>${query ? "换一个关键词试试。" : "在索引根目录下创建规章制度、合同模板或历史合同目录后刷新索引。"}</span>
+      </div>
+    `;
+    return;
+  }
+  els.knowledgeList.innerHTML = items.map((item) => query ? renderKnowledgeSearchItem(item) : renderKnowledgeDocumentItem(item)).join("");
+}
+
+function filterKnowledgeItems() {
+  if (state.selectedKnowledgeCategory === "全部") return state.knowledgeItems;
+  return state.knowledgeItems.filter((item) => item.category === state.selectedKnowledgeCategory);
+}
+
+function filterKnowledgeSearchResults() {
+  if (state.selectedKnowledgeCategory === "全部") return state.knowledgeSearchResults;
+  return state.knowledgeSearchResults.filter((item) => item.category === state.selectedKnowledgeCategory);
+}
+
+function renderKnowledgeDocumentItem(item) {
+  return `
+    <article class="knowledge-card">
+      <div class="knowledge-card-head">
+        <div>
+          <b>${escapeHtml(item.title || item.source || "-")}</b>
+          <span>${escapeHtml(item.source || "-")}</span>
+        </div>
+        <em>${escapeHtml(item.category || "-")} · ${item.chunks || 0} 片段</em>
+      </div>
+      <p>${escapeHtml(item.preview || "暂无可预览内容。")}</p>
+    </article>
+  `;
+}
+
+function renderKnowledgeSearchItem(item) {
+  return `
+    <article class="knowledge-card search-result-card">
+      <div class="knowledge-card-head">
+        <div>
+          <b>${escapeHtml(item.source || "-")}</b>
+          <span>${escapeHtml(item.category || "-")}</span>
+        </div>
+        <em>相关性 ${escapeHtml(String(item.score ?? "-"))}</em>
+      </div>
+      <p>${escapeHtml(item.snippet || "暂无片段内容。")}</p>
+    </article>
+  `;
 }
 
 async function openAgentsModal() {
@@ -1890,6 +2042,22 @@ function toast(message) {
 els.uploadBtn.addEventListener("click", () => els.fileInput.click());
 els.fileInput.addEventListener("change", () => uploadFile(els.fileInput.files[0]).catch((error) => toast(error.message)));
 els.refreshBtn.addEventListener("click", () => loadContracts().catch((error) => toast(error.message)));
+els.knowledgeBtn.addEventListener("click", () => openKnowledgeModal().catch((error) => toast(error.message)));
+els.closeKnowledgeBtn.addEventListener("click", () => els.knowledgeModal.classList.add("hidden"));
+els.refreshKnowledgeBtn.addEventListener("click", () => loadKnowledge(true).then(() => toast("知识库索引已刷新。")).catch((error) => toast(error.message)));
+els.knowledgeSearchBtn.addEventListener("click", () => searchKnowledge().catch((error) => toast(error.message)));
+els.knowledgeClearSearchBtn.addEventListener("click", () => {
+  state.knowledgeQuery = "";
+  state.knowledgeSearchResults = [];
+  els.knowledgeSearchInput.value = "";
+  renderKnowledge();
+});
+els.knowledgeSearchInput.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") {
+    event.preventDefault();
+    searchKnowledge().catch((error) => toast(error.message));
+  }
+});
 els.agentsBtn.addEventListener("click", () => openAgentsModal().catch((error) => toast(error.message)));
 els.flowStrategiesBtn.addEventListener("click", () => openFlowStrategiesModal().catch((error) => toast(error.message)));
 els.closeFlowStrategiesBtn.addEventListener("click", () => els.flowStrategiesModal.classList.add("hidden"));

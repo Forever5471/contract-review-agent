@@ -15,6 +15,48 @@ class LocalRagTool:
     def __init__(self) -> None:
         self._index: list[dict[str, Any]] | None = None
 
+    def list_entries(self, refresh: bool = False) -> dict[str, Any]:
+        if refresh:
+            self._index = None
+        index = self._ensure_index()
+        grouped: dict[tuple[str, str], dict[str, Any]] = {}
+        for item in index:
+            key = (item["category"], item["source"])
+            entry = grouped.setdefault(
+                key,
+                {
+                    "category": item["category"],
+                    "source": item["source"],
+                    "title": Path(item["source"]).name,
+                    "chunks": 0,
+                    "preview": "",
+                },
+            )
+            entry["chunks"] += 1
+            if not entry["preview"]:
+                entry["preview"] = item["text"][:520]
+        categories = []
+        for category in self._categories():
+            root = WORKSPACE_DIR / category
+            category_items = [item for item in grouped.values() if item["category"] == category]
+            categories.append(
+                {
+                    "name": category,
+                    "path": str(root),
+                    "exists": root.exists(),
+                    "documents": len(category_items),
+                    "chunks": sum(item["chunks"] for item in category_items),
+                }
+            )
+        return {
+            "tool_name": self.name,
+            "tool_version": self.version,
+            "workspace_root": str(WORKSPACE_DIR),
+            "categories": categories,
+            "items": sorted(grouped.values(), key=lambda item: (item["category"], item["source"])),
+            "chunk_count": len(index),
+        }
+
     def run(self, query: str, top_k: int = 4) -> dict[str, Any]:
         index = self._ensure_index()
         terms = [term for term in query.replace("/", " ").replace("、", " ").split() if term]
@@ -47,9 +89,8 @@ class LocalRagTool:
     def _ensure_index(self) -> list[dict[str, Any]]:
         if self._index is not None:
             return self._index
-        categories = ["规章制度", "合同模板", "历史合同"]
         items: list[dict[str, Any]] = []
-        for category in categories:
+        for category in self._categories():
             root = WORKSPACE_DIR / category
             if not root.exists():
                 continue
@@ -72,6 +113,9 @@ class LocalRagTool:
                     )
         self._index = items
         return items
+
+    def _categories(self) -> list[str]:
+        return ["规章制度", "合同模板", "历史合同"]
 
     def _score(self, text: str, terms: list[str], query: str) -> float:
         if not text:

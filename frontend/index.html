@@ -9,7 +9,7 @@
       window.location.replace("http://127.0.0.1:8123/");
     }
   </script>
-  <link rel="stylesheet" href="/styles.css?v=20260523-12" />
+  <link rel="stylesheet" href="/styles.css?v=20260523-13" />
 </head>
 <body>
   <div class="app-shell">
@@ -19,6 +19,7 @@
         <p>面向企业合同审核场景，自动识别合同类型、执行审查策略、定位风险依据，并辅助形成可流转的审核结论。</p>
       </div>
       <div class="topbar-actions">
+        <button id="knowledgeBtn" class="ghost-btn">知识库</button>
         <button id="agentsBtn" class="ghost-btn">智能体管理</button>
         <button id="flowStrategiesBtn" class="ghost-btn">流转策略</button>
         <button id="strategiesBtn" class="ghost-btn">审核策略</button>
@@ -160,6 +161,45 @@
       </aside>
     </main>
   </div>
+
+  <section id="knowledgeModal" class="rules-modal hidden" aria-label="知识库">
+    <div class="rules-shell knowledge-shell">
+      <header class="rules-head">
+        <div>
+          <h2>知识库</h2>
+          <p>展示本地 RAG 索引中的规章制度、合同模板和历史合同内容。</p>
+        </div>
+        <div class="rules-actions">
+          <button id="refreshKnowledgeBtn" class="ghost-btn">刷新索引</button>
+          <button id="closeKnowledgeBtn" class="ghost-btn">关闭</button>
+        </div>
+      </header>
+
+      <main class="knowledge-workspace">
+        <aside class="rules-list-panel knowledge-sidebar">
+          <div class="rule-list-summary">
+            <b id="knowledgeCount">0</b>
+            <span>份文档</span>
+          </div>
+          <div id="knowledgeRoot" class="knowledge-root"></div>
+          <div id="knowledgeCategories" class="knowledge-categories"></div>
+        </aside>
+
+        <section class="rule-editor knowledge-editor">
+          <div class="knowledge-toolbar">
+            <label>
+              知识检索
+              <input id="knowledgeSearchInput" placeholder="输入关键词，如：付款 违约 管辖" />
+            </label>
+            <button id="knowledgeSearchBtn" class="primary-btn" type="button">检索</button>
+            <button id="knowledgeClearSearchBtn" class="ghost-btn" type="button">清空</button>
+          </div>
+          <div id="knowledgeStats" class="knowledge-stats"></div>
+          <div id="knowledgeList" class="knowledge-list"></div>
+        </section>
+      </main>
+    </div>
+  </section>
 
   <section id="rulesModal" class="rules-modal hidden" aria-label="规则配置">
     <div class="rules-shell">
@@ -617,6 +657,6 @@
     </div>
   </section>
 
-  <script src="/app.js?v=20260523-12"></script>
+  <script src="/app.js?v=20260523-13"></script>
 </body>
 </html>

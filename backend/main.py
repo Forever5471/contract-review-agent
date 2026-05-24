@@ -49,6 +49,7 @@ app = FastAPI(title="Contract Review Agent MVP")
 store = JsonStore()
 intake_skill = ContractIntakeSkill()
 understanding_skill = ContractUnderstandingSkill()
+knowledge_tool = LocalRagTool()
 agent = ContractReviewAgent(store)
 
 
@@ -217,6 +218,29 @@ def rule_delete(rule_id: str) -> dict:
 @app.post("/api/rules/reset")
 def rule_reset() -> dict:
     return {"items": reset_rules()}
+
+
+@app.get("/api/knowledge")
+def knowledge_list(refresh: bool = False) -> dict:
+    return knowledge_tool.list_entries(refresh=refresh)
+
+
+@app.get("/api/knowledge/search")
+def knowledge_search(q: str = "", top_k: int = 8) -> dict:
+    query = q.strip()
+    if not query:
+        return {**knowledge_tool.list_entries(), "query": ""}
+    limit = max(1, min(top_k, 20))
+    result = knowledge_tool.run(query, top_k=limit)
+    return {
+        "tool_name": result["tool_name"],
+        "tool_version": result["tool_version"],
+        "query": query,
+        "items": result["data"]["results"],
+        "confidence": result["confidence"],
+        "confidence_detail": result["data"]["confidence_detail"],
+        "warnings": result.get("warnings", []),
+    }
 
 
 @app.post("/api/rules/debug")
