@@ -11,13 +11,23 @@ class ContractReviewSkill:
     name = "ContractReviewSkill"
     version = "0.3.0"
 
-    def __init__(self) -> None:
+    def __init__(self, llm_client: Any | None = None, agent_config: dict[str, Any] | None = None) -> None:
         self.rag_tool = LocalRagTool()
-        self.llm_client = build_llm_client()
-        self.rule_engine = RuleEngineTool(self.rag_tool, llm=self.llm_client)
+        self.agent_config = agent_config or {}
+        llm_tool_enabled = not self.agent_config or "LLMClient" in set(self.agent_config.get("tools") or [])
+        self.llm_client = llm_client if llm_client is not None else (
+            build_llm_client(self.agent_config.get("model")) if llm_tool_enabled else None
+        )
+        self.rule_engine = RuleEngineTool(self.rag_tool, llm=self.llm_client, agent_config=self.agent_config)
 
-    def run(self, text: str, contract_type: str, fields: dict[str, Any]) -> dict[str, Any]:
-        rule_result = self.rule_engine.run(text, contract_type, fields)
+    def run(
+        self,
+        text: str,
+        contract_type: str,
+        fields: dict[str, Any],
+        strategy: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        rule_result = self.rule_engine.run(text, contract_type, fields, strategy=strategy)
         return {
             "skill_name": self.name,
             "skill_version": self.version,

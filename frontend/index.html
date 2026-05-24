@@ -3,17 +3,28 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>合同智审 Agent MVP</title>
-  <link rel="stylesheet" href="/styles.css?v=20260521-15" />
+  <title>合同智审系统</title>
+  <script>
+    if (window.location.protocol === "file:") {
+      window.location.replace("http://127.0.0.1:8123/");
+    }
+  </script>
+  <link rel="stylesheet" href="/styles.css?v=20260523-12" />
 </head>
 <body>
   <div class="app-shell">
     <header class="topbar">
       <div>
-        <h1>合同智审 Agent MVP</h1>
-        <p>轻交互、重 Skill：合同入库后自动进入 Agent Loop 审核链路</p>
+        <h1>合同智审系统</h1>
+        <p>面向企业合同审核场景，自动识别合同类型、执行审查策略、定位风险依据，并辅助形成可流转的审核结论。</p>
       </div>
-      <button id="refreshBtn" class="ghost-btn">刷新</button>
+      <div class="topbar-actions">
+        <button id="agentsBtn" class="ghost-btn">智能体管理</button>
+        <button id="flowStrategiesBtn" class="ghost-btn">流转策略</button>
+        <button id="strategiesBtn" class="ghost-btn">审核策略</button>
+        <button id="rulesBtn" class="ghost-btn">规则配置</button>
+        <button id="refreshBtn" class="ghost-btn">刷新</button>
+      </div>
     </header>
 
     <section class="stats-bar" aria-label="合同审核数据统计">
@@ -80,7 +91,7 @@
         <div class="preview-header">
           <div>
             <h2 id="previewTitle">请选择一份合同</h2>
-            <p id="previewSub">中间区域用于展示合同解析预览、基础字段和模板匹配结果。</p>
+            <p id="previewSub">中间区域用于展示合同正文和审核依据。</p>
           </div>
           <button id="rerunBtn" class="ghost-btn" disabled>重新审核</button>
         </div>
@@ -95,18 +106,37 @@
             <div><b>合同类型</b><span id="contractType">-</span></div>
             <div><b>审核状态</b><span id="reviewStatus">-</span></div>
             <div><b>最大金额</b><span id="maxAmount">-</span></div>
-            <div><b>模板匹配度</b><span id="templateScore">-</span></div>
+            <div><b>审核策略</b><span id="strategyName">-</span></div>
           </div>
 
-          <div class="preview-tabs">
-            <button class="tab-btn active" data-tab="text">合同预览</button>
-            <button class="tab-btn" data-tab="fields">抽取字段</button>
-            <button class="tab-btn" data-tab="template">模板匹配</button>
-          </div>
+          <section class="contract-preview-block" aria-label="合同预览">
+            <div class="subsection-head">
+              <h3>合同预览</h3>
+              <span>解析后的合同正文</span>
+            </div>
+            <pre id="textTab" class="contract-preview-text contract-text"></pre>
+          </section>
 
-          <pre id="textTab" class="tab-panel contract-text"></pre>
-          <div id="fieldsTab" class="tab-panel hidden"></div>
-          <div id="templateTab" class="tab-panel hidden"></div>
+          <details class="evidence-details">
+            <summary>
+              <span>审核依据</span>
+              <small>结构化字段、模板匹配和策略依据</small>
+            </summary>
+            <div class="evidence-grid">
+              <section class="evidence-card">
+                <h3>结构化字段</h3>
+                <div id="fieldsTab"></div>
+              </section>
+              <section class="evidence-card">
+                <h3>模板匹配</h3>
+                <div id="templateTab"></div>
+              </section>
+              <section class="evidence-card">
+                <h3>命中策略</h3>
+                <div id="strategyTab"></div>
+              </section>
+            </div>
+          </details>
         </div>
       </section>
 
@@ -131,6 +161,462 @@
     </main>
   </div>
 
-  <script src="/app.js?v=20260521-15"></script>
+  <section id="rulesModal" class="rules-modal hidden" aria-label="规则配置">
+    <div class="rules-shell">
+      <header class="rules-head">
+        <div>
+          <h2>规则配置</h2>
+          <p>维护规则基本信息、Python 脚本判断和 LLM 指令判断。</p>
+        </div>
+        <div class="rules-actions">
+          <button id="newRuleBtn" class="ghost-btn">新建规则</button>
+          <button id="resetRulesBtn" class="ghost-btn">恢复默认</button>
+          <button id="closeRulesBtn" class="ghost-btn">关闭</button>
+        </div>
+      </header>
+
+      <main class="rules-workspace">
+        <aside class="rules-list-panel">
+          <div class="rule-list-summary">
+            <b id="rulesCount">0</b>
+            <span>条规则</span>
+          </div>
+          <div id="rulesList" class="rules-list"></div>
+        </aside>
+
+        <form id="ruleForm" class="rule-editor">
+          <div class="rule-editor-title">
+            <div>
+              <h3 id="ruleEditorTitle">规则详情</h3>
+              <span id="ruleEditorSub">选择左侧规则后编辑</span>
+            </div>
+            <label class="switch-row">
+              <input id="ruleEnabled" type="checkbox" />
+              <span>启用</span>
+            </label>
+          </div>
+
+          <div class="rule-form-grid">
+            <label>
+              规则编号
+              <input id="ruleId" required placeholder="如：SL-GEN-010" />
+            </label>
+            <label>
+              规则名称
+              <input id="ruleName" required placeholder="如：付款条件完整性" />
+            </label>
+            <label>
+              优先级
+              <select id="rulePriority">
+                <option value="P0">P0 重大</option>
+                <option value="P1">P1 高</option>
+                <option value="P2">P2 一般</option>
+                <option value="P3">P3 提示</option>
+              </select>
+            </label>
+            <label>
+              风险等级
+              <select id="ruleRiskLevel">
+                <option value="高风险">高风险</option>
+                <option value="一般风险">一般风险</option>
+              </select>
+            </label>
+            <label class="span-2">
+              适用范围
+              <input id="ruleScope" placeholder="多个范围用逗号分隔，如：通用规则，财务规则" />
+            </label>
+            <label class="span-2">
+              规则描述
+              <textarea id="ruleDescription" placeholder="描述这条规则要审查什么。"></textarea>
+            </label>
+          </div>
+
+          <div class="mode-tabs" role="tablist" aria-label="规则模式">
+            <button class="mode-tab active" type="button" data-rule-mode="脚本模式">脚本模式</button>
+            <button class="mode-tab" type="button" data-rule-mode="指令模式">指令模式</button>
+          </div>
+
+          <section id="scriptConfigPanel" class="script-config-panel">
+            <div class="param-section">
+              <div class="param-section-head">
+                <b>业务输入参数</b>
+                <button id="addInputParamBtn" class="ghost-btn" type="button">新增输入</button>
+              </div>
+              <div id="inputParamsList" class="param-list"></div>
+            </div>
+            <div class="param-section">
+              <div class="param-section-head">
+                <b>输出参数</b>
+                <button id="addOutputParamBtn" class="ghost-btn" type="button">新增输出</button>
+              </div>
+              <div id="outputParamsList" class="param-list"></div>
+            </div>
+            <section class="code-field">
+              <div class="code-editor-head">
+                <b>Python 脚本</b>
+                <span>Python 3 · .py</span>
+              </div>
+              <div class="python-editor">
+                <pre id="ruleScriptLines" class="code-lines" aria-hidden="true">1</pre>
+                <textarea
+                  id="ruleScript"
+                  spellcheck="false"
+                  autocomplete="off"
+                  autocapitalize="off"
+                  placeholder="使用 Python 3 语法编写规则判断逻辑。输入参数会按参数名注入为同名变量。"
+                ></textarea>
+              </div>
+            </section>
+          </section>
+
+          <label id="instructionField" class="code-field hidden">
+            LLM 指令
+            <textarea id="ruleInstruction" spellcheck="false" placeholder="告诉 LLM 应如何结合合同文本、字段和证据判断这条规则。"></textarea>
+          </label>
+
+          <section class="debug-panel">
+            <div>
+              <b>调试预览</b>
+              <span>上传一份文件，用当前未保存的规则配置试跑。</span>
+            </div>
+            <div class="debug-actions">
+              <input id="debugFileInput" type="file" accept=".doc,.docx,.pdf,.txt,.md" hidden />
+              <button id="chooseDebugFileBtn" class="ghost-btn" type="button">选择文件</button>
+              <button id="runRuleDebugBtn" class="primary-btn" type="button" disabled>运行调试</button>
+            </div>
+            <div id="debugFileName" class="debug-file-name">未选择文件</div>
+            <div id="debugResult" class="debug-result hidden"></div>
+          </section>
+
+          <div class="rule-editor-actions">
+            <button id="deleteRuleBtn" class="danger-btn" type="button">删除</button>
+            <button class="primary-btn" type="submit">保存规则</button>
+          </div>
+        </form>
+      </main>
+    </div>
+  </section>
+
+  <section id="strategiesModal" class="rules-modal hidden" aria-label="审核策略">
+    <div class="rules-shell strategies-shell">
+      <header class="rules-head">
+        <div>
+          <h2>审核策略</h2>
+          <p>按合同模板类型组织审核策略，关联规则后喂给智能体驱动审核。</p>
+        </div>
+        <div class="rules-actions">
+          <button id="newStrategyBtn" class="ghost-btn">新建策略</button>
+          <button id="resetStrategiesBtn" class="ghost-btn">恢复默认</button>
+          <button id="closeStrategiesBtn" class="ghost-btn">关闭</button>
+        </div>
+      </header>
+
+      <main class="strategies-workspace">
+        <aside class="rules-list-panel">
+          <div class="rule-list-summary">
+            <b id="strategiesCount">0</b>
+            <span>个策略</span>
+          </div>
+          <div id="strategiesList" class="rules-list"></div>
+        </aside>
+
+        <form id="strategyForm" class="rule-editor strategy-editor">
+          <div class="rule-editor-title">
+            <div>
+              <h3 id="strategyEditorTitle">策略详情</h3>
+              <span id="strategyEditorSub">选择左侧策略后编辑</span>
+            </div>
+            <label class="switch-row">
+              <input id="strategyEnabled" type="checkbox" />
+              <span>启用</span>
+            </label>
+          </div>
+
+          <div class="rule-form-grid">
+            <label>
+              策略编号
+              <input id="strategyId" required placeholder="如：strategy-sales" />
+            </label>
+            <label>
+              策略名称
+              <input id="strategyNameInput" required placeholder="如：销售合同审核策略" />
+            </label>
+            <label>
+              合同模板类型
+              <input id="strategyTemplateType" required list="templateTypeOptions" placeholder="如：销售合同" />
+              <datalist id="templateTypeOptions">
+                <option value="销售合同"></option>
+                <option value="工程合同"></option>
+                <option value="采购合同"></option>
+                <option value="通用合同"></option>
+              </datalist>
+            </label>
+            <label>
+              关联规则数
+              <input id="strategyRuleCount" disabled />
+            </label>
+            <label class="span-2">
+              策略描述
+              <textarea id="strategyDescription" placeholder="描述这类模板下的审查重点。"></textarea>
+            </label>
+            <label class="span-2">
+              智能体审核指令
+              <textarea id="strategyInstruction" class="prompt-textarea" placeholder="这段会随策略一起喂给智能体，用来说明审核重点。"></textarea>
+            </label>
+          </div>
+
+          <section class="strategy-rule-section">
+            <div class="param-section-head">
+              <b>关联规则</b>
+              <button id="createRuleFromStrategyBtn" class="ghost-btn" type="button">新建规则</button>
+            </div>
+            <div id="strategyRulesList" class="strategy-rules-list"></div>
+          </section>
+
+          <div class="rule-editor-actions">
+            <button id="deleteStrategyBtn" class="danger-btn" type="button">删除</button>
+            <button class="primary-btn" type="submit">保存策略</button>
+          </div>
+        </form>
+      </main>
+    </div>
+  </section>
+
+  <section id="flowStrategiesModal" class="rules-modal hidden" aria-label="审核流转策略">
+    <div class="rules-shell strategies-shell">
+      <header class="rules-head">
+        <div>
+          <h2>审核流转策略</h2>
+          <p>配置合同审查完成后的自动通过、人工确认、退回修改和禁止流转条件，并关联多套审核策略。</p>
+        </div>
+        <div class="rules-actions">
+          <button id="newFlowStrategyBtn" class="ghost-btn">新建流转策略</button>
+          <button id="resetFlowStrategiesBtn" class="ghost-btn">恢复默认</button>
+          <button id="closeFlowStrategiesBtn" class="ghost-btn">关闭</button>
+        </div>
+      </header>
+
+      <main class="strategies-workspace">
+        <aside class="rules-list-panel">
+          <div class="rule-list-summary">
+            <b id="flowStrategiesCount">0</b>
+            <span>个流转策略</span>
+          </div>
+          <div id="flowStrategiesList" class="rules-list"></div>
+        </aside>
+
+        <form id="flowStrategyForm" class="rule-editor strategy-editor">
+          <div class="rule-editor-title">
+            <div>
+              <h3 id="flowStrategyEditorTitle">流转策略详情</h3>
+              <span id="flowStrategyEditorSub">选择左侧策略后编辑</span>
+            </div>
+            <label class="switch-row">
+              <input id="flowStrategyEnabled" type="checkbox" />
+              <span>启用</span>
+            </label>
+          </div>
+
+          <div class="rule-form-grid">
+            <label>
+              策略编号
+              <input id="flowStrategyId" required placeholder="如：flow-standard-contracts" />
+            </label>
+            <label>
+              策略名称
+              <input id="flowStrategyName" required placeholder="如：标准合同流转策略" />
+            </label>
+            <label class="span-2">
+              策略描述
+              <textarea id="flowStrategyDescription" placeholder="描述这套流转策略适用的业务场景。"></textarea>
+            </label>
+          </div>
+
+          <section class="strategy-rule-section">
+            <div class="param-section-head">
+              <b>关联审核策略</b>
+              <span id="flowReviewStrategyCount" class="section-inline-note">已选 0 个</span>
+            </div>
+            <div id="flowReviewStrategiesList" class="strategy-rules-list"></div>
+          </section>
+
+          <section class="strategy-rule-section">
+            <div class="param-section-head"><b>自动通过条件</b></div>
+            <div class="rule-form-grid">
+              <label>P0 最大数<input id="autoPassMaxP0" type="number" min="0" /></label>
+              <label>P1 最大数<input id="autoPassMaxP1" type="number" min="0" /></label>
+              <label>一般风险最大数<input id="autoPassMaxGeneral" type="number" min="0" /></label>
+              <label>金额上限<input id="autoPassMaxAmount" type="number" min="0" step="1000" /></label>
+            </div>
+          </section>
+
+          <section class="strategy-rule-section">
+            <div class="param-section-head"><b>人工确认条件</b></div>
+            <div class="rule-form-grid">
+              <label>金额阈值<input id="humanConfirmMinAmount" type="number" min="0" step="1000" /></label>
+              <label>P1 达到<input id="humanConfirmMinP1" type="number" min="0" /></label>
+              <label>一般风险达到<input id="humanConfirmMinGeneral" type="number" min="0" /></label>
+              <label>P0 退回阈值<input id="needRevisionMinP0" type="number" min="0" /></label>
+            </div>
+          </section>
+
+          <section class="strategy-rule-section">
+            <div class="param-section-head"><b>关键规则动作</b></div>
+            <div class="rule-form-grid">
+              <label class="span-2">
+                命中后退回修改的规则
+                <input id="needRevisionRuleIds" placeholder="多个规则编号用逗号分隔，如：SL-GEN-012" />
+              </label>
+              <label class="span-2">
+                命中后禁止流转的规则
+                <input id="blockedRuleIds" placeholder="多个规则编号用逗号分隔" />
+              </label>
+            </div>
+          </section>
+
+          <div class="rule-editor-actions">
+            <button id="deleteFlowStrategyBtn" class="danger-btn" type="button">删除</button>
+            <button class="primary-btn" type="submit">保存流转策略</button>
+          </div>
+        </form>
+      </main>
+    </div>
+  </section>
+
+  <section id="agentsModal" class="rules-modal hidden" aria-label="智能体管理">
+    <div class="rules-shell agents-shell">
+      <header class="rules-head">
+        <div>
+          <h2>智能体管理</h2>
+          <p>维护智能体基础信息、提示词、Skills、工具和大模型配置。</p>
+        </div>
+        <div class="rules-actions">
+          <button id="newAgentBtn" class="ghost-btn">新建智能体</button>
+          <button id="resetAgentsBtn" class="ghost-btn">恢复默认</button>
+          <button id="closeAgentsBtn" class="ghost-btn">关闭</button>
+        </div>
+      </header>
+
+      <main class="agents-workspace">
+        <aside class="rules-list-panel">
+          <div class="rule-list-summary">
+            <b id="agentsCount">0</b>
+            <span>个智能体</span>
+          </div>
+          <div id="agentsList" class="rules-list"></div>
+        </aside>
+
+        <form id="agentForm" class="rule-editor agent-editor">
+          <div class="rule-editor-title">
+            <div>
+              <h3 id="agentEditorTitle">智能体详情</h3>
+              <span id="agentEditorSub">选择左侧智能体后编辑</span>
+            </div>
+            <label class="switch-row">
+              <input id="agentEnabled" type="checkbox" />
+              <span>启用</span>
+            </label>
+          </div>
+
+          <div class="rule-form-grid">
+            <label>
+              智能体编号
+              <input id="agentId" required />
+            </label>
+            <label>
+              智能体名称
+              <input id="agentName" required />
+            </label>
+            <label class="span-2">
+              描述
+              <textarea id="agentDescription"></textarea>
+            </label>
+            <label class="span-2">
+              系统提示词
+              <textarea id="agentSystemPrompt" class="prompt-textarea"></textarea>
+            </label>
+            <label class="span-2">
+              用户提示词
+              <textarea id="agentUserPrompt" class="prompt-textarea"></textarea>
+            </label>
+            <section class="agent-skills-section span-2">
+              <div class="param-section-head">
+                <b>Skills</b>
+                <span id="agentSkillCount" class="section-inline-note">已选 0 个</span>
+              </div>
+              <div class="agent-skills-layout">
+                <div>
+                  <h4>已选技能</h4>
+                  <div id="agentSelectedSkills" class="agent-skill-list"></div>
+                </div>
+                <div>
+                  <div class="resource-column-head">
+                    <h4>技能库</h4>
+                    <input id="agentSkillSearch" placeholder="搜索技能" />
+                  </div>
+                  <div id="agentSkillCatalog" class="agent-skill-list"></div>
+                </div>
+                <div>
+                  <h4>技能详情</h4>
+                  <div id="agentSkillDetail" class="agent-skill-detail">点击左侧技能查看详情。</div>
+                </div>
+              </div>
+            </section>
+            <section class="agent-skills-section span-2">
+              <div class="param-section-head">
+                <b>Tools</b>
+                <span id="agentToolCount" class="section-inline-note">已选 0 个</span>
+              </div>
+              <div class="agent-tools-layout">
+                <div>
+                  <h4>已选工具</h4>
+                  <div id="agentSelectedTools" class="agent-skill-list"></div>
+                </div>
+                <div>
+                  <div class="resource-column-head">
+                    <h4>工具库</h4>
+                    <input id="agentToolSearch" placeholder="搜索工具" />
+                  </div>
+                  <div id="agentToolCatalog" class="agent-skill-list"></div>
+                </div>
+                <div>
+                  <h4>工具详情</h4>
+                  <div id="agentToolDetail" class="agent-skill-detail">点击左侧工具查看详情。</div>
+                </div>
+              </div>
+            </section>
+            <label>
+              大模型供应商
+              <input id="agentModelProvider" placeholder="如：glm" />
+            </label>
+            <label>
+              大模型
+              <input id="agentModelName" placeholder="如：glm-5" />
+            </label>
+            <label>
+              Temperature
+              <input id="agentTemperature" type="number" min="0" max="2" step="0.1" />
+            </label>
+            <label>
+              API Key
+              <input id="agentModelApiKey" type="password" autocomplete="off" placeholder="留空则保留现有 Key" />
+              <span id="agentModelApiKeyStatus" class="field-hint">未配置</span>
+            </label>
+            <label class="switch-row model-switch">
+              <input id="agentModelEnabled" type="checkbox" />
+              <span>启用大模型</span>
+            </label>
+          </div>
+
+          <div class="rule-editor-actions">
+            <button id="deleteAgentBtn" class="danger-btn" type="button">删除</button>
+            <button class="primary-btn" type="submit">保存智能体</button>
+          </div>
+        </form>
+      </main>
+    </div>
+  </section>
+
+  <script src="/app.js?v=20260523-12"></script>
 </body>
 </html>

@@ -4,10 +4,12 @@ __pycache__/
 *.pyc
 .tmp-python-deps/
 data/store.json
+data/agents.json
 uploads/*
 !data/.gitkeep
 !uploads/.gitkeep
 server.log
+server.out.log
 server.err.log
 server.out.current.log
 server.err.current.log

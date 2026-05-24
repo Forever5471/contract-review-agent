@@ -58,6 +58,25 @@ class LLMConfig:
             thinking=os.getenv("GLM_THINKING", "disabled").strip() or "disabled",
         )
 
+    @classmethod
+    def from_agent_model(cls, model: dict[str, Any] | None) -> "LLMConfig | None":
+        model = model or {}
+        provider = str(model.get("provider") or "").strip().lower()
+        api_key = str(model.get("api_key") or "").strip()
+        enabled = bool(model.get("enabled", False))
+        if not enabled or provider != "glm" or not api_key:
+            return None
+        return cls(
+            provider="glm",
+            api_key=api_key,
+            model=str(model.get("model") or "glm-5").strip() or "glm-5",
+            base_url=str(model.get("base_url") or os.getenv("GLM_BASE_URL", "https://api.z.ai/api/paas/v4")).strip(),
+            temperature=float(model.get("temperature", 0.1)),
+            max_tokens=int(model.get("max_tokens", os.getenv("GLM_MAX_TOKENS", "900"))),
+            timeout_seconds=int(model.get("timeout_seconds", os.getenv("GLM_TIMEOUT_SECONDS", "30"))),
+            thinking=str(model.get("thinking") or os.getenv("GLM_THINKING", "disabled")).strip() or "disabled",
+        )
+
     @property
     def endpoint(self) -> str:
         url = self.base_url.rstrip("/")
@@ -136,8 +155,8 @@ class GLMChatClient:
         }
 
 
-def build_llm_client() -> GLMChatClient | None:
-    config = LLMConfig.from_env()
+def build_llm_client(model: dict[str, Any] | None = None) -> GLMChatClient | None:
+    config = LLMConfig.from_agent_model(model) if model else LLMConfig.from_env()
     if config is None:
         return None
     return GLMChatClient(config)
@@ -175,4 +194,3 @@ def _parse_json_content(content: str) -> dict[str, Any] | None:
         except json.JSONDecodeError:
             return None
     return None
-

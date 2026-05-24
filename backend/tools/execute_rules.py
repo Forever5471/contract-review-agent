@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from ..rules import RULES
+from ..rules import list_rules
 from .local_rag import LocalRagTool
 
 
@@ -11,15 +11,30 @@ class RuleEngineTool:
     name = "RuleEngineTool"
     version = "0.3.0"
 
-    def __init__(self, rag: LocalRagTool, llm: Any | None = None) -> None:
+    def __init__(self, rag: LocalRagTool, llm: Any | None = None, agent_config: dict[str, Any] | None = None) -> None:
         self.rag = rag
         self.llm = llm
+        self.agent_config = agent_config or {}
 
-    def run(self, text: str, contract_type: str, fields: dict[str, Any]) -> dict[str, Any]:
+    def run(
+        self,
+        text: str,
+        contract_type: str,
+        fields: dict[str, Any],
+        strategy: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         risks = []
         rule_events = []
         warnings = []
-        for rule in RULES:
+        rules = list_rules(include_disabled=False)
+        strategy_rule_ids = self._strategy_rule_ids(strategy)
+        if strategy_rule_ids:
+            rules_by_id = {rule["id"]: rule for rule in rules}
+            missing_rule_ids = [rule_id for rule_id in strategy_rule_ids if rule_id not in rules_by_id]
+            rules = [rules_by_id[rule_id] for rule_id in strategy_rule_ids if rule_id in rules_by_id]
+            if missing_rule_ids:
+                warnings.append(f"审核策略关联的规则不存在或未启用：{', '.join(missing_rule_ids)}")
+        for rule in rules:
             result = self._evaluate_rule(rule, text, contract_type, fields)
             rule_events.append(result)
             warnings.extend(result.get("warnings", []))
@@ -32,16 +47,62 @@ class RuleEngineTool:
             "status": "success",
             "confidence": confidence_detail["overall"],
             "data": {
-                "executed_rules": len(RULES),
+                "executed_rules": len(rules),
                 "risks": risks,
                 "rule_events": rule_events,
                 "llm_enabled": self.llm is not None,
                 "llm_provider": "glm" if self.llm is not None else None,
                 "llm_model": getattr(self.llm, "model", None),
                 "confidence_detail": confidence_detail,
+                "review_strategy": self._strategy_summary(strategy, rules),
             },
             "evidence": [item for risk in risks for item in risk.get("evidence", [])][:20],
             "warnings": warnings,
+        }
+
+    def _strategy_rule_ids(self, strategy: dict[str, Any] | None) -> list[str]:
+        if not strategy:
+            return []
+        rule_ids = strategy.get("rule_ids") or []
+        return [str(rule_id).strip() for rule_id in rule_ids if str(rule_id).strip()]
+
+    def _strategy_summary(self, strategy: dict[str, Any] | None, executed_rules: list[dict[str, Any]]) -> dict[str, Any] | None:
+        if not strategy:
+            return None
+        return {
+            "id": strategy.get("id"),
+            "name": strategy.get("name"),
+            "template_type": strategy.get("template_type"),
+            "description": strategy.get("description"),
+            "agent_instruction": strategy.get("agent_instruction"),
+            "rule_ids": self._strategy_rule_ids(strategy),
+            "executed_rule_ids": [rule.get("id") for rule in executed_rules],
+        }
+
+    def run_one(
+        self,
+        rule: dict[str, Any],
+        text: str,
+        contract_type: str,
+        fields: dict[str, Any],
+    ) -> dict[str, Any]:
+        result = self._evaluate_rule(rule, text, contract_type, fields)
+        confidence_detail = self._calculate_confidence([result], [] if result["passed"] else [result], fields, result.get("warnings", []))
+        return {
+            "tool_name": self.name,
+            "tool_version": self.version,
+            "status": "success",
+            "confidence": confidence_detail["overall"],
+            "data": {
+                "rule_event": result,
+                "risks": [] if result["passed"] else [result],
+                "llm_enabled": self.llm is not None,
+                "llm_provider": "glm" if self.llm is not None else None,
+                "llm_model": getattr(self.llm, "model", None),
+                "confidence_detail": confidence_detail,
+            },
+            "evidence": result.get("evidence", [])[:20],
+            "warnings": result.get("warnings", []),
         }
 
     def _evaluate_rule(
@@ -55,72 +116,36 @@ class RuleEngineTool:
         warnings: list[str] = []
         llm_used = False
         llm_meta: dict[str, Any] = {}
+        input_result = self._extract_rule_inputs(rule, text, contract_type, fields)
+        rule_inputs = input_result["values"]
+        warnings.extend(input_result.get("warnings", []))
 
-        if rule_id == "SL-GEN-003":
-            passed = len(fields.get("parties") or []) >= 2
-            issue = "合同主体信息疑似不完整。"
-            suggestion = "补充甲乙双方完整名称，并核对首页、正文和签章页一致性。"
-            evidence = [{"type": "field", "field": "parties", "value": fields.get("parties", [])}]
-
-        elif rule_id == "SL-GEN-004":
-            our_keywords = ["盛龙矿业", "洛阳盛龙", "栾川龙宇", "龙宇钼业"]
-            passed = any(keyword in text for keyword in our_keywords)
-            issue = "未明显识别到我方主体名称，可能存在主体错误或非标准文本。"
-            suggestion = "核对我方签约主体是否为授权主体，并确保签章主体一致。"
-            evidence = [{"type": "keyword", "expected": our_keywords}]
-
-        elif rule_id == "SL-GEN-010":
-            passed = bool(fields.get("has_payment_clause")) and bool(fields.get("has_invoice_clause"))
-            issue = "付款方式、付款条件或发票税率约定不完整。"
-            suggestion = "明确付款节点、付款条件、发票类型、税率和结算资料要求。"
-            evidence = self.rag.run("付款 条件 发票 税率 合同管理制度", top_k=2)["data"]["results"]
-
-        elif rule_id == "SL-GEN-012":
-            risky_patterns = ["生效前支付", "签订前支付", "审批前支付", "未生效前支付"]
-            passed = not any(pattern in text for pattern in risky_patterns)
-            issue = "发现付款可能早于合同生效或审批完成。"
-            suggestion = "将付款条件调整为合同审批完成且双方签字盖章生效后支付。"
-            evidence = [{"type": "pattern", "value": pattern} for pattern in risky_patterns if pattern in text]
-
-        elif rule_id == "SL-GEN-014":
-            passed = bool(fields.get("has_effective_clause")) and bool(fields.get("has_seal_clause"))
-            issue = "签章或生效条款不完整。"
-            suggestion = "补充“双方签字并盖章后生效”等明确表述。"
-            evidence = [{"type": "field", "field": "has_effective_clause", "value": fields.get("has_effective_clause")}]
-
-        elif rule_id == "SL-ROLE-OFFICE-001":
-            amount = fields.get("max_amount") or 0
-            passed = True
-            if amount >= 100_000_000:
-                issue = "合同金额达到 1 亿元以上，需会议评审和重点会签。"
-                suggestion = "触发重要合同会议评审流程。"
+        if rule["mode"] == "脚本模式":
+            script_result = self._evaluate_script_rule(rule, text, contract_type, fields, rule_inputs)
+            if script_result.get("error"):
                 passed = False
-            elif amount >= 300_000:
-                issue = "合同金额达到重要合同阈值，需按重要合同流程审核。"
-                suggestion = "触发重要合同审批和会签角色。"
+                issue = f"规则脚本执行失败：{script_result['error']}"
+                suggestion = "请在规则配置中修正 Python 脚本后重新审核。"
+                warnings.append(f"{rule_id} 脚本执行失败：{script_result['error']}")
+            elif script_result.get("missing_script"):
                 passed = False
-            evidence = [{"type": "field", "field": "max_amount", "value": amount}]
-
-        elif rule_id == "SL-TYPE-ENG-002":
-            is_engineering = "工程" in contract_type or any(kw in text for kw in ["施工", "承包", "外包"])
-            passed = (not is_engineering) or bool(fields.get("has_safety_clause"))
-            issue = "工程/施工/外包类合同未明显关联安全管理责任或安全协议。"
-            suggestion = "补充工程安全管理协议或明确安全生产责任、事故责任和保险要求。"
-            evidence = self.rag.run("工程 安全 管理 协议 安全生产", top_k=2)["data"]["results"]
-
-        elif rule_id == "SL-ROLE-LEGAL-002":
-            passed = bool(fields.get("has_breach_clause")) and not re.search(r"依法承担.{0,8}责任", text)
-            issue = "违约责任可能过于笼统，缺少量化标准或解除权。"
-            suggestion = "明确违约情形、违约金计算方式、赔偿范围、解除权和维权费用承担。"
-            evidence = self.rag.run("违约责任 违约金 解除权 赔偿 合同", top_k=2)["data"]["results"]
-
-        if rule["mode"] == "指令模式":
+                issue = "规则未配置 Python 脚本。"
+                suggestion = "请在规则配置中补充脚本后重新审核。"
+                warnings.append(f"{rule_id} 脚本模式未配置脚本。")
+            else:
+                passed = bool(script_result.get("passed", True))
+                issue = str(script_result.get("issue") or "").strip()
+                suggestion = str(script_result.get("suggestion") or "").strip()
+                evidence = script_result.get("evidence") or []
+        elif rule["mode"] == "指令模式":
+            evidence = self._build_instruction_evidence(rule)
             fallback_judgement = {"passed": passed, "issue": issue, "suggestion": suggestion}
             llm_result = self._evaluate_instruction_rule(
                 rule=rule,
                 text=text,
                 contract_type=contract_type,
                 fields=fields,
+                rule_inputs=rule_inputs,
                 evidence=evidence,
                 fallback=fallback_judgement,
             )
@@ -148,7 +173,15 @@ class RuleEngineTool:
                     },
                 ]
             elif llm_result.get("error"):
-                warnings.append(f"{rule_id} 指令模式 GLM 调用未生效，已回退脚本判断：{llm_result['error']}")
+                passed = False
+                issue = f"指令模式暂未完成判断：{llm_result['error']}"
+                suggestion = "请确认 LLM 已配置，或切换到脚本模式后使用 Python 脚本判断。"
+                warnings.append(f"{rule_id} 指令模式 LLM 调用未生效：{llm_result['error']}")
+
+        if not passed:
+            source_excerpt = self._find_source_excerpt(rule, text, evidence, rule_inputs)
+            if source_excerpt:
+                evidence = [{"type": "source_excerpt", "snippet": source_excerpt}, *evidence]
 
         return {
             "rule_id": rule_id,
@@ -163,7 +196,315 @@ class RuleEngineTool:
             "evidence": evidence,
             "warnings": warnings,
             "llm_used": llm_used,
+            "rule_inputs": rule_inputs,
+            "input_extraction": input_result.get("meta", {}),
             **llm_meta,
+        }
+
+    def _find_source_excerpt(
+        self,
+        rule: dict[str, Any],
+        text: str,
+        evidence: list[dict[str, Any]],
+        rule_inputs: dict[str, Any],
+    ) -> str:
+        for item in evidence:
+            snippet = str(item.get("snippet") or "").strip()
+            if snippet:
+                return snippet
+
+        candidates: list[str] = []
+        for value in rule_inputs.values():
+            if isinstance(value, str) and value.strip():
+                candidates.append(value.strip())
+            elif isinstance(value, list):
+                candidates.extend(str(item).strip() for item in value if str(item).strip())
+
+        keyword_map = {
+            "SL-GEN-003": ["甲方", "乙方", "供货人", "收货人", "主体", "签章页"],
+            "SL-GEN-004": ["甲方", "乙方", "洛阳盛龙", "盛龙矿业", "供货人"],
+            "SL-GEN-010": ["付款", "支付", "发票", "税率", "结算"],
+            "SL-GEN-012": ["生效前支付", "签订前支付", "审批前支付", "付款"],
+            "SL-GEN-014": ["签字", "盖章", "生效", "签章"],
+            "SL-ROLE-OFFICE-001": ["合同总价", "金额", "价款"],
+            "SL-TYPE-ENG-002": ["工程", "施工", "安全", "外包"],
+            "SL-ROLE-LEGAL-002": ["违约", "违约金", "解除", "赔偿"],
+        }
+        candidates.extend(keyword_map.get(rule.get("id"), []))
+        candidates.extend(str(item).strip() for item in rule.get("scope", []) if str(item).strip())
+
+        normalized_text = text or ""
+        for candidate in candidates:
+            if len(candidate) < 2:
+                continue
+            index = normalized_text.find(candidate)
+            if index >= 0:
+                start = max(0, index - 90)
+                end = min(len(normalized_text), index + len(candidate) + 180)
+                return normalized_text[start:end].strip()
+        return normalized_text[:260].strip()
+
+    def _extract_rule_inputs(
+        self,
+        rule: dict[str, Any],
+        text: str,
+        contract_type: str,
+        fields: dict[str, Any],
+    ) -> dict[str, Any]:
+        params = [
+            param
+            for param in rule.get("input_params", [])
+            if param.get("name") not in {"text", "fields", "contract_type", "rule", "rag", "re"}
+        ]
+        values = {param["name"]: self._fallback_param_value(param, text, contract_type, fields) for param in params}
+        warnings: list[str] = []
+        meta = {
+            "method": "fallback_fields",
+            "llm_used": False,
+            "params": params,
+        }
+        if not params:
+            return {"values": values, "warnings": warnings, "meta": meta}
+        if self.llm is None:
+            return {"values": values, "warnings": warnings, "meta": meta}
+
+        llm_result = self._extract_rule_inputs_with_llm(rule, params, text, contract_type, fields)
+        if llm_result.get("ok"):
+            values.update(llm_result.get("values") or {})
+            meta = {
+                **meta,
+                "method": "llm",
+                "llm_used": True,
+                "llm_provider": llm_result.get("provider"),
+                "llm_model": llm_result.get("model"),
+                "llm_request_id": llm_result.get("request_id"),
+            }
+        elif llm_result.get("error"):
+            warnings.append(f"{rule['id']} 输入参数 LLM 抽取未生效，已使用系统字段和启发式抽取：{llm_result['error']}")
+        return {"values": values, "warnings": warnings, "meta": meta}
+
+    def _fallback_param_value(
+        self,
+        param: dict[str, Any],
+        text: str,
+        contract_type: str,
+        fields: dict[str, Any],
+    ) -> Any:
+        name = param.get("name")
+        description = str(param.get("description") or param.get("display_name") or "")
+        if name == "contract_type":
+            return contract_type
+        if name == "text":
+            return text
+        if name in fields:
+            return self._coerce_param_value(fields.get(name), param.get("type"))
+        alias_map = {
+            "amount": "max_amount",
+            "contract_amount": "max_amount",
+            "total_amount": "max_amount",
+            "parties": "parties",
+            "party_names": "parties",
+        }
+        if name in alias_map and alias_map[name] in fields:
+            return self._coerce_param_value(fields.get(alias_map[name]), param.get("type"))
+        if param.get("type") == "boolean":
+            return self._fallback_boolean_by_description(description, text, fields)
+        if param.get("type") == "number" and ("金额" in description or "价" in description):
+            return fields.get("max_amount")
+        if param.get("type") == "array":
+            return []
+        if param.get("type") == "object":
+            return {}
+        return ""
+
+    def _fallback_boolean_by_description(self, description: str, text: str, fields: dict[str, Any]) -> bool:
+        desc_map = [
+            ("付款", "has_payment_clause"),
+            ("支付", "has_payment_clause"),
+            ("发票", "has_invoice_clause"),
+            ("税率", "has_invoice_clause"),
+            ("生效", "has_effective_clause"),
+            ("签章", "has_seal_clause"),
+            ("盖章", "has_seal_clause"),
+            ("违约", "has_breach_clause"),
+            ("安全", "has_safety_clause"),
+            ("环保", "has_safety_clause"),
+        ]
+        for keyword, field_name in desc_map:
+            if keyword in description and field_name in fields:
+                return bool(fields.get(field_name))
+        return any(keyword in text for keyword, _ in desc_map if keyword in description)
+
+    def _extract_rule_inputs_with_llm(
+        self,
+        rule: dict[str, Any],
+        params: list[dict[str, Any]],
+        text: str,
+        contract_type: str,
+        fields: dict[str, Any],
+    ) -> dict[str, Any]:
+        if self.llm is None:
+            return {"ok": False, "error": "LLM 未配置"}
+        payload = {
+            "output_schema": {
+                "values": {
+                    param["name"]: {
+                        "type": param.get("type", "string"),
+                        "display_name": param.get("display_name", param["name"]),
+                        "description": param.get("description", ""),
+                    }
+                    for param in params
+                },
+                "confidence": "number，0到1之间",
+                "evidence_summary": "string，简述抽取依据",
+            },
+            "rule": {
+                "id": rule.get("id"),
+                "name": rule.get("name"),
+                "description": rule.get("description"),
+            },
+            "contract": {
+                "contract_type": contract_type,
+                "fields": fields,
+                "text_excerpt": text[:9000],
+            },
+            "instructions": [
+                "只从合同文本或结构化字段中抽取参数，不要编造。",
+                "无法确定的 string 返回空字符串，number 返回 null，boolean 返回 false，array 返回空数组，object 返回空对象。",
+                "只返回 JSON 对象。",
+            ],
+        }
+        messages = [
+            {
+                "role": "system",
+                "content": self._system_prompt(
+                    "你是合同规则参数抽取器，根据参数定义从合同中抽取结构化值。只返回JSON对象。"
+                ),
+            },
+            {"role": "user", "content": json_dumps(payload)},
+        ]
+        result = self.llm.complete_json(messages, request_id=f"{rule['id'].lower()}-inputs-{uuidish()}")
+        if not result.get("ok"):
+            return result
+        raw_values = (result.get("json") or {}).get("values") or {}
+        return {
+            "ok": True,
+            "provider": result.get("provider"),
+            "model": result.get("model"),
+            "request_id": result.get("request_id"),
+            "values": {
+                param["name"]: self._coerce_param_value(raw_values.get(param["name"]), param.get("type"))
+                for param in params
+            },
+        }
+
+    def _coerce_param_value(self, value: Any, param_type: str | None) -> Any:
+        if param_type == "number":
+            try:
+                return None if value in {None, ""} else float(value)
+            except (TypeError, ValueError):
+                return None
+        if param_type == "boolean":
+            if isinstance(value, bool):
+                return value
+            if isinstance(value, str):
+                return value.strip().lower() in {"true", "1", "yes", "y", "是", "有"}
+            return bool(value)
+        if param_type == "array":
+            if isinstance(value, list):
+                return value
+            if value in {None, ""}:
+                return []
+            return [value]
+        if param_type == "object":
+            return value if isinstance(value, dict) else {}
+        if value is None:
+            return ""
+        return str(value)
+
+    def _build_instruction_evidence(self, rule: dict[str, Any]) -> list[dict[str, Any]]:
+        query = " ".join(
+            item
+            for item in [
+                rule.get("name", ""),
+                rule.get("description", ""),
+                rule.get("instruction", ""),
+                " ".join(rule.get("scope") or []),
+            ]
+            if item
+        )
+        if not query:
+            return []
+        return self.rag.run(query, top_k=2)["data"]["results"]
+
+    def _evaluate_script_rule(
+        self,
+        rule: dict[str, Any],
+        text: str,
+        contract_type: str,
+        fields: dict[str, Any],
+        rule_inputs: dict[str, Any],
+    ) -> dict[str, Any]:
+        script = str(rule.get("script") or "").strip()
+        if not script:
+            return {
+                "passed": False,
+                "issue": "",
+                "suggestion": "",
+                "evidence": [],
+                "error": "",
+                "missing_script": True,
+            }
+
+        safe_builtins = {
+            "abs": abs,
+            "all": all,
+            "any": any,
+            "bool": bool,
+            "dict": dict,
+            "enumerate": enumerate,
+            "float": float,
+            "int": int,
+            "len": len,
+            "list": list,
+            "max": max,
+            "min": min,
+            "range": range,
+            "round": round,
+            "set": set,
+            "sorted": sorted,
+            "str": str,
+            "sum": sum,
+        }
+        env: dict[str, Any] = {
+            "__builtins__": safe_builtins,
+            "text": text,
+            "contract_type": contract_type,
+            "fields": fields,
+            "rule_inputs": rule_inputs,
+            "rule": rule,
+            "rag": self.rag,
+            "re": re,
+            "passed": True,
+            "issue": "",
+            "suggestion": "",
+            "evidence": [],
+        }
+        env.update(rule_inputs)
+        try:
+            exec(compile(script, f"<rule {rule['id']}>", "exec"), env, env)
+        except Exception as exc:
+            return {"error": str(exc)}
+
+        evidence = env.get("evidence") or []
+        if not isinstance(evidence, list):
+            evidence = [{"type": "script_value", "value": evidence}]
+        return {
+            "passed": bool(env.get("passed", True)),
+            "issue": str(env.get("issue") or "").strip(),
+            "suggestion": str(env.get("suggestion") or "").strip(),
+            "evidence": evidence,
+            "error": "",
         }
 
     def _calculate_confidence(
@@ -302,24 +643,35 @@ class RuleEngineTool:
         text: str,
         contract_type: str,
         fields: dict[str, Any],
+        rule_inputs: dict[str, Any],
         evidence: list[dict[str, Any]],
         fallback: dict[str, Any],
     ) -> dict[str, Any]:
         if self.llm is None:
-            return {"ok": False, "error": ""}
+            return {"ok": False, "error": "LLM 未配置"}
 
         messages = [
             {
                 "role": "system",
                 "content": (
-                    "你是合同审查规则执行器，只依据用户提供的合同文本、结构化字段、规则说明和RAG证据判断。"
-                    "不要编造合同中不存在的事实，不输出思考过程。"
-                    "只返回JSON对象，字段为 passed、issue、suggestion、confidence、evidence_summary。"
+                    self._system_prompt(
+                        "你是合同审查规则执行器，只依据用户提供的合同文本、结构化字段、规则说明和RAG证据判断。"
+                        "不要编造合同中不存在的事实，不输出思考过程。"
+                        "只返回JSON对象，字段为 passed、issue、suggestion、confidence、evidence_summary。"
+                    )
                 ),
             },
             {
                 "role": "user",
-                "content": self._build_instruction_rule_payload(rule, text, contract_type, fields, evidence, fallback),
+                "content": self._build_instruction_rule_payload(
+                    rule,
+                    text,
+                    contract_type,
+                    fields,
+                    evidence,
+                    fallback,
+                    rule_inputs,
+                ),
             },
         ]
         result = self.llm.complete_json(messages, request_id=f"{rule['id'].lower()}-{uuidish()}")
@@ -351,6 +703,7 @@ class RuleEngineTool:
         fields: dict[str, Any],
         evidence: list[dict[str, Any]],
         fallback: dict[str, Any],
+        rule_inputs: dict[str, Any] | None = None,
     ) -> str:
         payload = {
             "output_schema": {
@@ -367,21 +720,30 @@ class RuleEngineTool:
                 "priority": rule["priority"],
                 "risk_level": rule["risk_level"],
                 "description": rule["description"],
+                "instruction": rule.get("instruction", ""),
+                "input_params": rule.get("input_params", []),
+                "output_params": rule.get("output_params", []),
             },
             "contract": {
                 "contract_type": contract_type,
                 "fields": fields,
+                "rule_inputs": rule_inputs or {},
                 "text_excerpt": text[:7000],
             },
             "rag_evidence": evidence[:4],
             "fallback_judgement": fallback,
             "instructions": [
+                str(self.agent_config.get("user_prompt") or ""),
                 "如果合同文本证据不足以证明规则通过，应返回 passed=false。",
                 "问题和建议要面向合同审核人员，简洁、可落地。",
                 "不得引用输入以外的制度或事实。",
             ],
         }
         return json_dumps(payload)
+
+    def _system_prompt(self, task_prompt: str) -> str:
+        base = str(self.agent_config.get("system_prompt") or "").strip()
+        return f"{base}\n\n{task_prompt}" if base else task_prompt
 
 
 def json_dumps(value: Any) -> str:

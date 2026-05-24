@@ -10,9 +10,13 @@ class ReviewReportingSkill:
     name = "ReviewReportingSkill"
     version = "0.5.0"
 
-    def __init__(self) -> None:
+    def __init__(self, llm_client: Any | None = None, agent_config: dict[str, Any] | None = None) -> None:
         self.report_tool = ReportBuildTool()
-        self.llm_client = build_llm_client()
+        self.agent_config = agent_config or {}
+        llm_tool_enabled = not self.agent_config or "LLMClient" in set(self.agent_config.get("tools") or [])
+        self.llm_client = llm_client if llm_client is not None else (
+            build_llm_client(self.agent_config.get("model")) if llm_tool_enabled else None
+        )
 
     def run(self, contract: dict[str, Any], risks: list[dict[str, Any]]) -> dict[str, Any]:
         report_result = self.report_tool.run(contract, risks)
@@ -182,7 +186,7 @@ class ReviewReportingSkill:
         messages = [
             {
                 "role": "system",
-                "content": (
+                "content": self._system_prompt(
                     "你是合同智审报告助手。你只负责把已有审查结果润色成面向业务和客户的中文摘要，"
                     "不得新增风险，不得改变风险数量、优先级、结论和人工确认状态。"
                     "只返回JSON对象，字段为 summary。"
@@ -233,9 +237,10 @@ class ReviewReportingSkill:
             },
             "risks": risk_briefs,
             "instructions": [
-                "必须保留已命中3条P1风险这个事实，不得写成低风险或已通过。",
-                "摘要要指出主要问题集中在主体、付款发票、签章生效三个方面。",
-                "结尾要提示需要经办、财务、法务或用印相关人员人工确认后再流转。",
+                str(self.agent_config.get("user_prompt") or ""),
+                "必须严格保留 fixed_result 中的结论、风险数量、风险等级分布和人工确认状态。",
+                "摘要中的主要问题必须来自 risks 列表，不得套用样例问题或新增未命中的风险。",
+                "如 need_human_confirm 为 true，结尾应提示相关人员人工确认后再流转；否则可提示按业务流程继续办理。",
                 "只返回JSON，不要Markdown，不要项目符号。",
             ],
         }
@@ -265,7 +270,7 @@ class ReviewReportingSkill:
         messages = [
             {
                 "role": "system",
-                "content": (
+                "content": self._system_prompt(
                     "你是企业合同人工审核意见助手。你只根据合同智审智能体已经生成的最终报告、风险清单和修改建议，"
                     "起草一段可放入人工审核意见输入框的中文默认意见。"
                     "不得新增风险，不得改变审核结论，不得替人工做最终决策。只返回 JSON 对象，字段为 opinion。"
@@ -329,6 +334,7 @@ class ReviewReportingSkill:
             },
             "risks": risk_briefs,
             "instructions": [
+                str(self.agent_config.get("user_prompt") or ""),
                 "用人工审核人的口吻起草，语气专业、可直接提交。",
                 "若存在 P0/P1 风险，应明确建议补充或修订后再流转，不要直接写同意通过。",
                 "若无风险，可写建议按制度完成用印和归档后通过。",
@@ -355,3 +361,7 @@ class ReviewReportingSkill:
             f"经系统智能审核，本合同共发现 {len(risks)} 项风险，其中高风险 {high_count} 项，"
             f"主要涉及{risk_names}。{action}"
         )
+
+    def _system_prompt(self, task_prompt: str) -> str:
+        base = str(self.agent_config.get("system_prompt") or "").strip()
+        return f"{base}\n\n{task_prompt}" if base else task_prompt

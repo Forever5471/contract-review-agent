@@ -12,7 +12,8 @@ class ContractUnderstandingSkill:
     name = "ContractUnderstandingSkill"
     version = "0.2.0"
 
-    def __init__(self) -> None:
+    def __init__(self, agent_config: dict[str, Any] | None = None) -> None:
+        self.agent_config = agent_config or {}
         self.parse_tool = DocumentParseTool()
         self.classify_tool = ContractClassifyTool()
         self.extract_tool = FieldExtractTool()
