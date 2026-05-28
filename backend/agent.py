@@ -25,6 +25,7 @@ REQUIRED_TOOLS_BY_SKILL = {
     "ContractUnderstandingSkill": [
         "DocumentParseTool",
         "ContractClassifyTool",
+        "ClauseExtractTool",
         "FieldExtractTool",
         "TemplateMatchTool",
     ],
@@ -72,12 +73,14 @@ class ContractReviewAgent:
             understanding = understanding_result["data"]
             text = understanding["text"]
             contract_type = understanding["contract_type"]
+            clauses = understanding.get("clauses") or []
             fields = understanding["fields"]
             review_strategy = match_strategy(contract_type, understanding["template_match"])
             self.store.update_contract(
                 contract_id,
                 parsed_text=understanding["preview"],
                 contract_type=contract_type,
+                clauses=clauses,
                 fields=fields,
                 template_match=understanding["template_match"],
                 review_strategy=review_strategy,
@@ -96,7 +99,7 @@ class ContractReviewAgent:
             review_result = self._call_skill(
                 contract_id,
                 review_skill.name,
-                lambda: review_skill.run(text, contract_type, fields, strategy=review_strategy),
+                lambda: review_skill.run(text, contract_type, fields, clauses=clauses, strategy=review_strategy),
             )
             review_data = review_result["data"]
             risks = review_data["risks"]
@@ -119,6 +122,7 @@ class ContractReviewAgent:
                     {
                         **contract,
                         "contract_type": contract_type,
+                        "clauses": clauses,
                         "fields": fields,
                         "review_strategy": review_strategy,
                     },
@@ -137,6 +141,7 @@ class ContractReviewAgent:
                 {
                     **contract,
                     "contract_type": contract_type,
+                    "clauses": clauses,
                     "fields": fields,
                     "review_strategy": review_strategy,
                 },
@@ -168,6 +173,7 @@ class ContractReviewAgent:
                 status_text=status_text,
                 parsed_text=understanding["preview"],
                 contract_type=contract_type,
+                clauses=clauses,
                 fields=fields,
                 template_match=understanding["template_match"],
                 review_strategy=review_strategy,

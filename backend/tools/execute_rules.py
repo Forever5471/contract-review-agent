@@ -21,6 +21,7 @@ class RuleEngineTool:
         text: str,
         contract_type: str,
         fields: dict[str, Any],
+        clauses: list[dict[str, Any]] | None = None,
         strategy: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         risks = []
@@ -35,7 +36,7 @@ class RuleEngineTool:
             if missing_rule_ids:
                 warnings.append(f"审核策略关联的规则不存在或未启用：{', '.join(missing_rule_ids)}")
         for rule in rules:
-            result = self._evaluate_rule(rule, text, contract_type, fields)
+            result = self._evaluate_rule(rule, text, contract_type, fields, clauses or [])
             rule_events.append(result)
             warnings.extend(result.get("warnings", []))
             if not result["passed"]:
@@ -85,8 +86,9 @@ class RuleEngineTool:
         text: str,
         contract_type: str,
         fields: dict[str, Any],
+        clauses: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
-        result = self._evaluate_rule(rule, text, contract_type, fields)
+        result = self._evaluate_rule(rule, text, contract_type, fields, clauses or [])
         confidence_detail = self._calculate_confidence([result], [] if result["passed"] else [result], fields, result.get("warnings", []))
         return {
             "tool_name": self.name,
@@ -106,7 +108,12 @@ class RuleEngineTool:
         }
 
     def _evaluate_rule(
-        self, rule: dict[str, Any], text: str, contract_type: str, fields: dict[str, Any]
+        self,
+        rule: dict[str, Any],
+        text: str,
+        contract_type: str,
+        fields: dict[str, Any],
+        clauses: list[dict[str, Any]],
     ) -> dict[str, Any]:
         rule_id = rule["id"]
         passed = True
@@ -116,12 +123,13 @@ class RuleEngineTool:
         warnings: list[str] = []
         llm_used = False
         llm_meta: dict[str, Any] = {}
-        input_result = self._extract_rule_inputs(rule, text, contract_type, fields)
+        relevant_clauses = self._match_relevant_clauses(rule, clauses)
+        input_result = self._extract_rule_inputs(rule, text, contract_type, fields, relevant_clauses)
         rule_inputs = input_result["values"]
         warnings.extend(input_result.get("warnings", []))
 
         if rule["mode"] == "脚本模式":
-            script_result = self._evaluate_script_rule(rule, text, contract_type, fields, rule_inputs)
+            script_result = self._evaluate_script_rule(rule, text, contract_type, fields, rule_inputs, relevant_clauses)
             if script_result.get("error"):
                 passed = False
                 issue = f"规则脚本执行失败：{script_result['error']}"
@@ -138,13 +146,14 @@ class RuleEngineTool:
                 suggestion = str(script_result.get("suggestion") or "").strip()
                 evidence = script_result.get("evidence") or []
         elif rule["mode"] == "指令模式":
-            evidence = self._build_instruction_evidence(rule)
+            evidence = self._build_instruction_evidence(rule, relevant_clauses)
             fallback_judgement = {"passed": passed, "issue": issue, "suggestion": suggestion}
             llm_result = self._evaluate_instruction_rule(
                 rule=rule,
                 text=text,
                 contract_type=contract_type,
                 fields=fields,
+                clauses=relevant_clauses,
                 rule_inputs=rule_inputs,
                 evidence=evidence,
                 fallback=fallback_judgement,
@@ -179,7 +188,7 @@ class RuleEngineTool:
                 warnings.append(f"{rule_id} 指令模式 LLM 调用未生效：{llm_result['error']}")
 
         if not passed:
-            source_excerpt = self._find_source_excerpt(rule, text, evidence, rule_inputs)
+            source_excerpt = self._find_source_excerpt(rule, text, evidence, rule_inputs, relevant_clauses)
             if source_excerpt:
                 evidence = [{"type": "source_excerpt", "snippet": source_excerpt}, *evidence]
 
@@ -196,10 +205,90 @@ class RuleEngineTool:
             "evidence": evidence,
             "warnings": warnings,
             "llm_used": llm_used,
+            "matched_clauses": [
+                {
+                    "id": clause.get("id"),
+                    "number": clause.get("number"),
+                    "title": clause.get("title"),
+                    "type": clause.get("type"),
+                    "location": clause.get("location"),
+                    "text": str(clause.get("text") or "")[:500],
+                }
+                for clause in relevant_clauses[:5]
+            ],
             "rule_inputs": rule_inputs,
             "input_extraction": input_result.get("meta", {}),
             **llm_meta,
         }
+
+    def _match_relevant_clauses(self, rule: dict[str, Any], clauses: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        if not clauses:
+            return []
+        query_parts = [
+            rule.get("id", ""),
+            rule.get("name", ""),
+            rule.get("description", ""),
+            rule.get("instruction", ""),
+            " ".join(rule.get("scope") or []),
+            " ".join(str(param.get("description") or param.get("display_name") or "") for param in rule.get("input_params", [])),
+        ]
+        query = " ".join(query_parts)
+        terms = self._rule_keywords(rule)
+        scored = []
+        for clause in clauses:
+            haystack = f"{clause.get('title', '')} {clause.get('type', '')} {clause.get('text', '')}"
+            score = 0
+            for term in terms:
+                if term and term in haystack:
+                    score += 3 if term in str(clause.get("title", "")) else 1
+            for token in re.findall(r"[\u4e00-\u9fa5]{2,}|[A-Za-z0-9_]{2,}", query):
+                if token in haystack:
+                    score += 0.4
+            if score > 0:
+                scored.append((score, clause))
+        scored.sort(key=lambda item: item[0], reverse=True)
+        return [clause for _, clause in scored[:6]]
+
+    def _rule_keywords(self, rule: dict[str, Any]) -> list[str]:
+        keyword_map = {
+            "SL-GEN-003": ["甲方", "乙方", "供货人", "收货人", "主体", "签章页"],
+            "SL-GEN-004": ["甲方", "乙方", "洛阳盛龙", "盛龙矿业", "供货人"],
+            "SL-GEN-010": ["付款", "支付", "发票", "税率", "结算"],
+            "SL-GEN-012": ["生效前支付", "签订前支付", "审批前支付", "付款"],
+            "SL-GEN-014": ["签字", "盖章", "生效", "签章"],
+            "SL-ROLE-OFFICE-001": ["合同总价", "金额", "价款", "审批"],
+            "SL-TYPE-ENG-002": ["工程", "施工", "安全", "外包"],
+            "SL-ROLE-LEGAL-002": ["违约", "违约金", "解除", "赔偿"],
+        }
+        text = " ".join(
+            str(item or "")
+            for item in [
+                rule.get("name"),
+                rule.get("description"),
+                rule.get("instruction"),
+                " ".join(rule.get("scope") or []),
+            ]
+        )
+        terms = set(keyword_map.get(rule.get("id"), []))
+        terms.update(re.findall(r"[\u4e00-\u9fa5]{2,}|[A-Za-z0-9_]{2,}", text))
+        return [term for term in terms if len(term) >= 2]
+
+    def _param_looks_like_clause(self, name: str, description: str) -> bool:
+        haystack = f"{name} {description}"
+        return any(keyword in haystack for keyword in ["条款", "原文", "约定", "付款", "发票", "违约", "签章", "生效", "安全"])
+
+    def _clause_briefs(self, clauses: list[dict[str, Any]], limit: int = 6) -> list[dict[str, Any]]:
+        return [
+            {
+                "id": clause.get("id"),
+                "number": clause.get("number"),
+                "title": clause.get("title"),
+                "type": clause.get("type"),
+                "location": clause.get("location"),
+                "text": str(clause.get("text") or "")[:900],
+            }
+            for clause in clauses[:limit]
+        ]
 
     def _find_source_excerpt(
         self,
@@ -207,11 +296,16 @@ class RuleEngineTool:
         text: str,
         evidence: list[dict[str, Any]],
         rule_inputs: dict[str, Any],
+        relevant_clauses: list[dict[str, Any]] | None = None,
     ) -> str:
         for item in evidence:
             snippet = str(item.get("snippet") or "").strip()
             if snippet:
                 return snippet
+        for clause in relevant_clauses or []:
+            clause_text = str(clause.get("text") or "").strip()
+            if clause_text:
+                return clause_text[:500]
 
         candidates: list[str] = []
         for value in rule_inputs.values():
@@ -250,13 +344,14 @@ class RuleEngineTool:
         text: str,
         contract_type: str,
         fields: dict[str, Any],
+        relevant_clauses: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         params = [
             param
             for param in rule.get("input_params", [])
             if param.get("name") not in {"text", "fields", "contract_type", "rule", "rag", "re"}
         ]
-        values = {param["name"]: self._fallback_param_value(param, text, contract_type, fields) for param in params}
+        values = {param["name"]: self._fallback_param_value(param, text, contract_type, fields, relevant_clauses or []) for param in params}
         warnings: list[str] = []
         meta = {
             "method": "fallback_fields",
@@ -268,7 +363,7 @@ class RuleEngineTool:
         if self.llm is None:
             return {"values": values, "warnings": warnings, "meta": meta}
 
-        llm_result = self._extract_rule_inputs_with_llm(rule, params, text, contract_type, fields)
+        llm_result = self._extract_rule_inputs_with_llm(rule, params, text, contract_type, fields, relevant_clauses or [])
         if llm_result.get("ok"):
             values.update(llm_result.get("values") or {})
             meta = {
@@ -289,6 +384,7 @@ class RuleEngineTool:
         text: str,
         contract_type: str,
         fields: dict[str, Any],
+        relevant_clauses: list[dict[str, Any]],
     ) -> Any:
         name = param.get("name")
         description = str(param.get("description") or param.get("display_name") or "")
@@ -307,6 +403,16 @@ class RuleEngineTool:
         }
         if name in alias_map and alias_map[name] in fields:
             return self._coerce_param_value(fields.get(alias_map[name]), param.get("type"))
+        if relevant_clauses and self._param_looks_like_clause(name, description):
+            clause_text = "\n\n".join(
+                f"{clause.get('number', '')} {clause.get('title', '')}\n{clause.get('text', '')}"
+                for clause in relevant_clauses[:4]
+            ).strip()
+            if param.get("type") == "array":
+                return [clause.get("text", "") for clause in relevant_clauses[:4]]
+            if param.get("type") == "object":
+                return relevant_clauses[0]
+            return clause_text
         if param.get("type") == "boolean":
             return self._fallback_boolean_by_description(description, text, fields)
         if param.get("type") == "number" and ("金额" in description or "价" in description):
@@ -342,6 +448,7 @@ class RuleEngineTool:
         text: str,
         contract_type: str,
         fields: dict[str, Any],
+        relevant_clauses: list[dict[str, Any]],
     ) -> dict[str, Any]:
         if self.llm is None:
             return {"ok": False, "error": "LLM 未配置"}
@@ -366,6 +473,7 @@ class RuleEngineTool:
             "contract": {
                 "contract_type": contract_type,
                 "fields": fields,
+                "relevant_clauses": self._clause_briefs(relevant_clauses, limit=6),
                 "text_excerpt": text[:9000],
             },
             "instructions": [
@@ -422,7 +530,7 @@ class RuleEngineTool:
             return ""
         return str(value)
 
-    def _build_instruction_evidence(self, rule: dict[str, Any]) -> list[dict[str, Any]]:
+    def _build_instruction_evidence(self, rule: dict[str, Any], relevant_clauses: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
         query = " ".join(
             item
             for item in [
@@ -433,9 +541,19 @@ class RuleEngineTool:
             ]
             if item
         )
-        if not query:
-            return []
-        return self.rag.run(query, top_k=2)["data"]["results"]
+        clause_evidence = [
+            {
+                "type": "clause",
+                "clause_id": clause.get("id"),
+                "title": clause.get("title"),
+                "clause_type": clause.get("type"),
+                "location": clause.get("location"),
+                "snippet": str(clause.get("text") or "")[:420],
+            }
+            for clause in (relevant_clauses or [])[:3]
+        ]
+        rag_evidence = self.rag.run(query, top_k=2)["data"]["results"] if query else []
+        return [*clause_evidence, *rag_evidence]
 
     def _evaluate_script_rule(
         self,
@@ -444,6 +562,7 @@ class RuleEngineTool:
         contract_type: str,
         fields: dict[str, Any],
         rule_inputs: dict[str, Any],
+        relevant_clauses: list[dict[str, Any]],
     ) -> dict[str, Any]:
         script = str(rule.get("script") or "").strip()
         if not script:
@@ -481,6 +600,7 @@ class RuleEngineTool:
             "text": text,
             "contract_type": contract_type,
             "fields": fields,
+            "clauses": relevant_clauses,
             "rule_inputs": rule_inputs,
             "rule": rule,
             "rag": self.rag,
@@ -643,6 +763,7 @@ class RuleEngineTool:
         text: str,
         contract_type: str,
         fields: dict[str, Any],
+        clauses: list[dict[str, Any]],
         rule_inputs: dict[str, Any],
         evidence: list[dict[str, Any]],
         fallback: dict[str, Any],
@@ -668,6 +789,7 @@ class RuleEngineTool:
                     text,
                     contract_type,
                     fields,
+                    clauses,
                     evidence,
                     fallback,
                     rule_inputs,
@@ -701,6 +823,7 @@ class RuleEngineTool:
         text: str,
         contract_type: str,
         fields: dict[str, Any],
+        clauses: list[dict[str, Any]],
         evidence: list[dict[str, Any]],
         fallback: dict[str, Any],
         rule_inputs: dict[str, Any] | None = None,
@@ -727,6 +850,7 @@ class RuleEngineTool:
             "contract": {
                 "contract_type": contract_type,
                 "fields": fields,
+                "clauses": self._clause_briefs(clauses, limit=8),
                 "rule_inputs": rule_inputs or {},
                 "text_excerpt": text[:7000],
             },

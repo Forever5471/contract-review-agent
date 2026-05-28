@@ -9,7 +9,7 @@
       window.location.replace("http://127.0.0.1:8123/");
     }
   </script>
-  <link rel="stylesheet" href="/styles.css?v=20260523-13" />
+  <link rel="stylesheet" href="/styles.css?v=20260523-18" />
 </head>
 <body>
   <div class="app-shell">
@@ -20,6 +20,7 @@
       </div>
       <div class="topbar-actions">
         <button id="knowledgeBtn" class="ghost-btn">知识库</button>
+        <button id="feedbackBtn" class="ghost-btn">反馈学习</button>
         <button id="agentsBtn" class="ghost-btn">智能体管理</button>
         <button id="flowStrategiesBtn" class="ghost-btn">流转策略</button>
         <button id="strategiesBtn" class="ghost-btn">审核策略</button>
@@ -121,9 +122,13 @@
           <details class="evidence-details">
             <summary>
               <span>审核依据</span>
-              <small>结构化字段、模板匹配和策略依据</small>
+              <small>条款对象、结构化字段、模板匹配和策略依据</small>
             </summary>
             <div class="evidence-grid">
+              <section class="evidence-card">
+                <h3>条款对象</h3>
+                <div id="clausesTab"></div>
+              </section>
               <section class="evidence-card">
                 <h3>结构化字段</h3>
                 <div id="fieldsTab"></div>
@@ -183,6 +188,7 @@
           </div>
           <div id="knowledgeRoot" class="knowledge-root"></div>
           <div id="knowledgeCategories" class="knowledge-categories"></div>
+          <input id="knowledgeFileInput" type="file" accept=".doc,.docx,.pdf,.txt,.md" hidden />
         </aside>
 
         <section class="rule-editor knowledge-editor">
@@ -196,6 +202,39 @@
           </div>
           <div id="knowledgeStats" class="knowledge-stats"></div>
           <div id="knowledgeList" class="knowledge-list"></div>
+        </section>
+      </main>
+    </div>
+  </section>
+
+  <section id="feedbackModal" class="rules-modal hidden" aria-label="反馈学习">
+    <div class="rules-shell feedback-shell">
+      <header class="rules-head">
+        <div>
+          <h2>反馈学习</h2>
+          <p>汇总人工审核意见、关联风险、命中条款和规则上下文，为后续沉淀候选规则提供样本池。</p>
+        </div>
+        <div class="rules-actions">
+          <button id="refreshFeedbackBtn" class="ghost-btn">刷新反馈</button>
+          <button id="closeFeedbackBtn" class="ghost-btn">关闭</button>
+        </div>
+      </header>
+
+      <main class="feedback-workspace">
+        <aside class="rules-list-panel feedback-sidebar">
+          <div class="feedback-summary-grid">
+            <div><b id="feedbackTotal">0</b><span>反馈</span></div>
+            <div><b id="feedbackRejectCount">0</b><span>退回</span></div>
+            <div><b id="feedbackApproveCount">0</b><span>通过</span></div>
+            <div><b id="feedbackOpinionCount">0</b><span>有意见</span></div>
+          </div>
+          <div id="feedbackTopRules" class="feedback-top-rules"></div>
+          <div id="feedbackList" class="rules-list"></div>
+        </aside>
+
+        <section class="rule-editor feedback-editor">
+          <div id="feedbackOverview" class="feedback-overview"></div>
+          <div id="feedbackDetail" class="feedback-detail"></div>
         </section>
       </main>
     </div>
@@ -657,6 +696,6 @@
     </div>
   </section>
 
-  <script src="/app.js?v=20260523-13"></script>
+  <script src="/app.js?v=20260523-17"></script>
 </body>
 </html>

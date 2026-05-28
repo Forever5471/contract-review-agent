@@ -18,8 +18,12 @@ const state = {
   knowledge: null,
   knowledgeItems: [],
   knowledgeSearchResults: [],
+  feedbackItems: [],
+  feedbackSummary: null,
   selectedKnowledgeCategory: "全部",
+  selectedFeedbackId: null,
   knowledgeQuery: "",
+  knowledgeUploadCategory: "",
   ruleStats: null,
   selectedId: null,
   selectedRuleId: null,
@@ -45,6 +49,7 @@ const $ = (selector) => document.querySelector(selector);
 const els = {
   uploadBtn: $("#uploadBtn"),
   knowledgeBtn: $("#knowledgeBtn"),
+  feedbackBtn: $("#feedbackBtn"),
   agentsBtn: $("#agentsBtn"),
   flowStrategiesBtn: $("#flowStrategiesBtn"),
   strategiesBtn: $("#strategiesBtn"),
@@ -66,6 +71,7 @@ const els = {
   maxAmount: $("#maxAmount"),
   strategyName: $("#strategyName"),
   textTab: $("#textTab"),
+  clausesTab: $("#clausesTab"),
   fieldsTab: $("#fieldsTab"),
   templateTab: $("#templateTab"),
   strategyTab: $("#strategyTab"),
@@ -89,11 +95,23 @@ const els = {
   knowledgeCount: $("#knowledgeCount"),
   knowledgeRoot: $("#knowledgeRoot"),
   knowledgeCategories: $("#knowledgeCategories"),
+  knowledgeFileInput: $("#knowledgeFileInput"),
   knowledgeSearchInput: $("#knowledgeSearchInput"),
   knowledgeSearchBtn: $("#knowledgeSearchBtn"),
   knowledgeClearSearchBtn: $("#knowledgeClearSearchBtn"),
   knowledgeStats: $("#knowledgeStats"),
   knowledgeList: $("#knowledgeList"),
+  feedbackModal: $("#feedbackModal"),
+  closeFeedbackBtn: $("#closeFeedbackBtn"),
+  refreshFeedbackBtn: $("#refreshFeedbackBtn"),
+  feedbackTotal: $("#feedbackTotal"),
+  feedbackRejectCount: $("#feedbackRejectCount"),
+  feedbackApproveCount: $("#feedbackApproveCount"),
+  feedbackOpinionCount: $("#feedbackOpinionCount"),
+  feedbackTopRules: $("#feedbackTopRules"),
+  feedbackList: $("#feedbackList"),
+  feedbackOverview: $("#feedbackOverview"),
+  feedbackDetail: $("#feedbackDetail"),
   rulesModal: $("#rulesModal"),
   closeRulesBtn: $("#closeRulesBtn"),
   newRuleBtn: $("#newRuleBtn"),
@@ -303,13 +321,16 @@ function renderKnowledgeCategories() {
     ...categories,
   ];
   els.knowledgeCategories.innerHTML = categoryButtons.map((category) => `
-    <button class="knowledge-category ${state.selectedKnowledgeCategory === category.name ? "active" : ""}" type="button" data-knowledge-category="${escapeHtml(category.name)}">
-      <span>
-        <b>${escapeHtml(category.name)}</b>
-        <small>${category.exists ? "可用" : "目录未创建"}</small>
-      </span>
-      <em>${category.documents || 0} 文档 · ${category.chunks || 0} 片段</em>
-    </button>
+    <article class="knowledge-category ${state.selectedKnowledgeCategory === category.name ? "active" : ""}">
+      <button class="knowledge-category-main" type="button" data-knowledge-category="${escapeHtml(category.name)}">
+        <span>
+          <b>${escapeHtml(category.name)}</b>
+          <small>${category.exists ? "可用" : "目录未创建"}</small>
+        </span>
+        <em>${category.documents || 0} 文档 · ${category.chunks || 0} 片段</em>
+      </button>
+      ${category.name === "全部" ? "" : `<button class="ghost-btn knowledge-upload-btn" type="button" data-knowledge-upload="${escapeHtml(category.name)}">上传</button>`}
+    </article>
   `).join("");
   els.knowledgeCategories.querySelectorAll("[data-knowledge-category]").forEach((button) => {
     button.addEventListener("click", () => {
@@ -320,6 +341,32 @@ function renderKnowledgeCategories() {
       renderKnowledge();
     });
   });
+  els.knowledgeCategories.querySelectorAll("[data-knowledge-upload]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.knowledgeUploadCategory = button.dataset.knowledgeUpload || "";
+      els.knowledgeFileInput.value = "";
+      els.knowledgeFileInput.click();
+    });
+  });
+}
+
+async function uploadKnowledgeFile(file) {
+  if (!file || !state.knowledgeUploadCategory) return;
+  const formData = new FormData();
+  formData.append("category", state.knowledgeUploadCategory);
+  formData.append("file", file);
+  const data = await api("/api/knowledge/upload", {
+    method: "POST",
+    body: formData,
+  });
+  state.knowledge = data.knowledge;
+  state.knowledgeItems = data.knowledge?.items || [];
+  state.selectedKnowledgeCategory = data.item?.category || state.knowledgeUploadCategory;
+  state.knowledgeQuery = "";
+  state.knowledgeSearchResults = [];
+  els.knowledgeSearchInput.value = "";
+  renderKnowledge();
+  toast(`已上传到${state.selectedKnowledgeCategory}。`);
 }
 
 function renderKnowledgeSearchStats(data = null) {
@@ -389,6 +436,231 @@ function renderKnowledgeSearchItem(item) {
       <p>${escapeHtml(item.snippet || "暂无片段内容。")}</p>
     </article>
   `;
+}
+
+async function openFeedbackModal() {
+  els.feedbackModal.classList.remove("hidden");
+  await loadHumanFeedback();
+}
+
+async function loadHumanFeedback() {
+  const data = await api("/api/human-feedback");
+  state.feedbackItems = data.items || [];
+  state.feedbackSummary = data.summary || {};
+  if (!state.selectedFeedbackId && state.feedbackItems[0]) {
+    state.selectedFeedbackId = state.feedbackItems[0].id;
+  }
+  if (state.selectedFeedbackId && !state.feedbackItems.some((item) => item.id === state.selectedFeedbackId)) {
+    state.selectedFeedbackId = state.feedbackItems[0]?.id || null;
+  }
+  renderFeedback();
+}
+
+function renderFeedback() {
+  renderFeedbackSummary();
+  renderFeedbackList();
+  renderFeedbackDetail();
+}
+
+function renderFeedbackSummary() {
+  const summary = state.feedbackSummary || {};
+  els.feedbackTotal.textContent = summary.total || 0;
+  els.feedbackRejectCount.textContent = summary.reject_count || 0;
+  els.feedbackApproveCount.textContent = summary.approve_count || 0;
+  els.feedbackOpinionCount.textContent = summary.with_opinion_count || 0;
+  const topRules = summary.top_rules || [];
+  if (!topRules.length) {
+    els.feedbackTopRules.innerHTML = `<div class="feedback-top-empty">暂无高频关联规则</div>`;
+    return;
+  }
+  els.feedbackTopRules.innerHTML = `
+    <b>高频关联规则</b>
+    ${topRules.map((rule) => `
+      <span>${escapeHtml(rule.rule_id)} · ${escapeHtml(rule.rule_name)}<em>${rule.count}</em></span>
+    `).join("")}
+  `;
+}
+
+function renderFeedbackList() {
+  const items = state.feedbackItems || [];
+  if (!items.length) {
+    els.feedbackList.innerHTML = `
+      <div class="empty-state compact-empty">
+        <strong>暂无人工反馈</strong>
+        <span>人工审核提交意见后，会在这里形成可学习的反馈样本。</span>
+      </div>
+    `;
+    return;
+  }
+  els.feedbackList.innerHTML = items.map((item) => `
+    <article class="rule-list-item feedback-list-item ${item.id === state.selectedFeedbackId ? "active" : ""}" data-feedback-id="${escapeHtml(item.id)}">
+      <div>
+        <b>${escapeHtml(item.contract_name || "未命名合同")}</b>
+        <span>${escapeHtml(item.contract_type || "未识别合同类型")} · ${escapeHtml(item.time || "-")}</span>
+      </div>
+      <div class="rule-list-meta">
+        <em class="feedback-action ${escapeHtml(feedbackActionClass(item.action))}">${escapeHtml(feedbackActionLabel(item.action, item.decision))}</em>
+        <em class="priority-pill priority-P${item.risk_summary?.p0 ? "0" : item.risk_summary?.p1 ? "1" : "2"}">风险 ${item.risk_summary?.total || 0}</em>
+      </div>
+    </article>
+  `).join("");
+  els.feedbackList.querySelectorAll("[data-feedback-id]").forEach((node) => {
+    node.addEventListener("click", () => {
+      state.selectedFeedbackId = node.dataset.feedbackId;
+      renderFeedback();
+    });
+  });
+}
+
+function renderFeedbackDetail() {
+  const item = state.feedbackItems.find((entry) => entry.id === state.selectedFeedbackId);
+  if (!item) {
+    els.feedbackOverview.innerHTML = `
+      <div class="feedback-detail-head">
+        <div>
+          <h3>反馈样本池</h3>
+          <p>人工审核提交意见后，系统会把意见、风险、命中条款和规则上下文汇总到这里。</p>
+        </div>
+      </div>
+      <div class="feedback-metrics">
+        <span><b>${state.feedbackSummary?.total || 0}</b>反馈</span>
+        <span><b>${state.feedbackSummary?.reject_count || 0}</b>退回</span>
+        <span><b>${state.feedbackSummary?.approve_count || 0}</b>通过</span>
+        <span><b>${state.feedbackSummary?.contract_count || 0}</b>合同</span>
+      </div>
+    `;
+    els.feedbackDetail.innerHTML = `
+      <div class="empty-state">
+        <strong>暂无反馈详情</strong>
+        <span>选择左侧反馈后查看人工意见、关联风险和规则上下文。</span>
+      </div>
+    `;
+    return;
+  }
+  els.feedbackOverview.innerHTML = `
+    <div class="feedback-detail-head">
+      <div>
+        <h3>${escapeHtml(item.contract_name || "未命名合同")}</h3>
+        <p>${escapeHtml(item.contract_type || "-")} · ${escapeHtml(item.review_strategy?.name || "未关联审核策略")}</p>
+      </div>
+      <div class="feedback-head-actions">
+        <span class="feedback-action ${escapeHtml(feedbackActionClass(item.action))}">${escapeHtml(feedbackActionLabel(item.action, item.decision))}</span>
+        <button class="ghost-btn" type="button" data-feedback-contract-id="${escapeHtml(item.contract_id || "")}">查看合同</button>
+      </div>
+    </div>
+    <div class="feedback-metrics">
+      <span><b>${item.risk_summary?.total || 0}</b>风险</span>
+      <span><b>${item.risk_summary?.p0 || 0}</b>P0</span>
+      <span><b>${item.risk_summary?.p1 || 0}</b>P1</span>
+      <span><b>${formatAmount(item.max_amount)}</b>金额</span>
+    </div>
+  `;
+  els.feedbackDetail.innerHTML = `
+    <section class="feedback-card">
+      <div class="feedback-card-title">
+        <b>人工反馈意见</b>
+        <span>${escapeHtml(item.reviewer || "人工审核人")} · ${escapeHtml(item.time || "-")}</span>
+      </div>
+      <p>${escapeHtml(item.opinion || "未填写补充意见。")}</p>
+    </section>
+    <section class="feedback-card">
+      <div class="feedback-card-title">
+        <b>审核上下文</b>
+        <span>${escapeHtml(item.status_text || "-")}</span>
+      </div>
+      <div class="feedback-context-grid">
+        <span><b>审核策略</b>${escapeHtml(item.review_strategy?.name || "-")}</span>
+        <span><b>流转策略</b>${escapeHtml(item.flow_decision?.flow_strategy || "-")}</span>
+        <span><b>流转结论</b>${escapeHtml(item.flow_decision?.status_text || item.flow_decision?.decision || "-")}</span>
+        <span><b>经办部门</b>${escapeHtml(item.business_dept || "-")}</span>
+      </div>
+      ${item.report_summary ? `<p class="feedback-report-summary">${escapeHtml(item.report_summary)}</p>` : ""}
+    </section>
+    ${renderFeedbackRiskSection(item)}
+    ${renderFeedbackPassedRules(item)}
+    ${renderFeedbackClauseSection(item)}
+  `;
+  const openContractBtn = els.feedbackOverview.querySelector("[data-feedback-contract-id]");
+  openContractBtn?.addEventListener("click", async () => {
+    const contractId = openContractBtn.dataset.feedbackContractId;
+    if (!contractId) return;
+    els.feedbackModal.classList.add("hidden");
+    await selectContract(contractId);
+  });
+}
+
+function renderFeedbackRiskSection(item) {
+  const risks = item.risks || [];
+  if (!risks.length) {
+    return `
+      <section class="feedback-card">
+        <div class="feedback-card-title"><b>关联风险</b><span>0 项</span></div>
+        <div class="empty-state compact-empty"><strong>该反馈未关联风险项</strong><span>通常发生在人工通过或无风险合同。</span></div>
+      </section>
+    `;
+  }
+  return `
+    <section class="feedback-card">
+      <div class="feedback-card-title"><b>关联风险</b><span>${risks.length} 项</span></div>
+      <div class="feedback-risk-list">
+        ${risks.map((risk) => `
+          <article>
+            <div>
+              <b>${escapeHtml(risk.rule_id || "-")} · ${escapeHtml(risk.rule_name || "-")}</b>
+              <span>${escapeHtml(risk.mode || "-")} · ${escapeHtml(risk.risk_level || "-")} · ${escapeHtml(risk.priority || "-")}</span>
+            </div>
+            <p>${escapeHtml(risk.issue || "-")}</p>
+            <small>${escapeHtml(risk.source_excerpt || risk.suggestion || "")}</small>
+          </article>
+        `).join("")}
+      </div>
+    </section>
+  `;
+}
+
+function renderFeedbackPassedRules(item) {
+  const passedRules = item.passed_rules || [];
+  if (!passedRules.length) return "";
+  return `
+    <section class="feedback-card">
+      <div class="feedback-card-title"><b>当次通过规则</b><span>${passedRules.length} 条</span></div>
+      <div class="feedback-pill-list">
+        ${passedRules.map((rule) => `<span>${escapeHtml(rule.rule_id || "-")} · ${escapeHtml(rule.rule_name || "-")}</span>`).join("")}
+      </div>
+    </section>
+  `;
+}
+
+function renderFeedbackClauseSection(item) {
+  const clauses = item.matched_clauses || [];
+  if (!clauses.length) return "";
+  return `
+    <section class="feedback-card">
+      <div class="feedback-card-title"><b>命中条款样本</b><span>${clauses.length} 条</span></div>
+      <div class="feedback-clause-list">
+        ${clauses.map((clause) => `
+          <article>
+            <b>${escapeHtml(clause.number || "")}${escapeHtml(clause.title || "未命名条款")}</b>
+            <span>${escapeHtml(clause.type || "-")} · ${escapeHtml(clause.location || "-")}</span>
+            <p>${escapeHtml(clause.text || "")}</p>
+          </article>
+        `).join("")}
+      </div>
+    </section>
+  `;
+}
+
+function feedbackActionLabel(action, decision) {
+  if (decision) return decision;
+  if (action === "approve") return "确认通过";
+  if (action === "reject") return "确认不通过";
+  return "人工反馈";
+}
+
+function feedbackActionClass(action) {
+  if (action === "approve") return "feedback-action-approve";
+  if (action === "reject") return "feedback-action-reject";
+  return "feedback-action-neutral";
 }
 
 async function openAgentsModal() {
@@ -1522,12 +1794,59 @@ function renderContract(contract) {
   els.maxAmount.textContent = formatAmount(contract.fields?.max_amount);
   els.strategyName.textContent = contract.review_strategy?.name || "待匹配";
   els.textTab.textContent = contract.parsed_text || "正在等待文档解析结果...";
+  els.clausesTab.innerHTML = renderClauses(contract.clauses || []);
   els.fieldsTab.innerHTML = renderObjectTable(contract.fields || {});
   els.templateTab.innerHTML = renderObjectTable(contract.template_match || {});
   els.strategyTab.innerHTML = renderObjectTable(formatStrategyEvidence(contract.review_strategy || {}));
   els.agentPromptVersion.textContent = contract.agent_prompt_version || "-";
   renderTimeline(contract.review?.events || []);
   renderResult(contract);
+}
+
+function renderClauses(clauses) {
+  if (!clauses.length) {
+    return `<div class="empty-state"><strong>暂无条款对象</strong><span>等待合同理解 Skill 输出。</span></div>`;
+  }
+  return `
+    <div class="clause-list">
+      ${clauses.map((clause) => `
+        <article class="clause-card">
+          <div class="clause-card-head">
+            <b>${escapeHtml(clause.number || clause.id || "-")} ${escapeHtml(clause.title || "未命名条款")}</b>
+            <em>${escapeHtml(formatClauseType(clause.type))}</em>
+          </div>
+          <span>${escapeHtml(clause.location || formatClausePosition(clause.position) || "-")}</span>
+          <p>${escapeHtml(clause.text || "")}</p>
+        </article>
+      `).join("")}
+    </div>
+  `;
+}
+
+function formatClauseType(type) {
+  const map = {
+    parties: "主体",
+    subject: "标的",
+    payment: "付款",
+    invoice: "发票",
+    delivery: "交付",
+    acceptance: "验收",
+    effective: "签章生效",
+    breach: "违约",
+    dispute: "争议",
+    safety: "安全",
+    confidentiality: "保密",
+    termination: "解除终止",
+    other: "其他",
+  };
+  return map[type] || type || "-";
+}
+
+function formatClausePosition(position) {
+  if (!position) return "";
+  if (position.line_start && position.line_end) return `第${position.line_start}-${position.line_end}行`;
+  if (position.char_start !== undefined && position.char_end !== undefined) return `${position.char_start}-${position.char_end}`;
+  return "";
 }
 
 function formatStrategyEvidence(strategy) {
@@ -1578,6 +1897,7 @@ function flattenConfidenceDetail(detail) {
     overall: "总体置信度",
     document_parse: "文档解析",
     contract_classify: "合同类型识别",
+    clause_extract: "条款抽取",
     field_extract: "字段抽取",
     template_match: "模板匹配",
     method: "计算方法",
@@ -1595,6 +1915,9 @@ function flattenConfidenceDetail(detail) {
     party_extraction: "主体抽取",
     amount_extraction: "金额抽取",
     clause_signal: "条款信号",
+    clause_coverage: "条款覆盖",
+    clause_type_coverage: "条款类型覆盖",
+    location_coverage: "位置覆盖",
     contract_type_confidence: "合同类型置信度",
     section_coverage: "模板章节覆盖",
     matched_section_volume: "匹配章节数量",
@@ -1619,6 +1942,7 @@ function flattenConfidenceDetail(detail) {
     "overall",
     "document_parse",
     "contract_classify",
+    "clause_extract",
     "field_extract",
     "template_match",
     "field_completeness",
@@ -1828,6 +2152,7 @@ function renderRiskCards(risks) {
         <span class="risk-close">×</span>
       </div>
       <div class="risk-source-excerpt">${escapeHtml(getRiskSourceExcerpt(risk))}</div>
+      ${renderRiskMatchedClauses(risk)}
       <section class="risk-detail-block">
         <div class="risk-block-title">
           <span class="risk-block-icon">!</span>
@@ -1845,6 +2170,30 @@ function renderRiskCards(risks) {
       <div class="risk-rule-meta">${escapeHtml(risk.mode)} · ${escapeHtml(risk.risk_level)} · ${escapeHtml(risk.priority)}</div>
     </article>
   `).join("");
+}
+
+function renderRiskMatchedClauses(risk) {
+  const clauses = risk.matched_clauses || [];
+  if (!clauses.length) return "";
+  return `
+    <section class="risk-clause-block">
+      <div class="risk-clause-head">
+        <b>命中条款</b>
+        <span>${clauses.length} 条</span>
+      </div>
+      <div class="risk-clause-list">
+        ${clauses.slice(0, 4).map((clause) => `
+          <article class="risk-clause-item">
+            <div>
+              <b>${escapeHtml(clause.number || clause.id || "-")} ${escapeHtml(clause.title || "未命名条款")}</b>
+              <span>${escapeHtml(formatClauseType(clause.type))} · ${escapeHtml(clause.location || "-")}</span>
+            </div>
+            <p>${escapeHtml(clause.text || "")}</p>
+          </article>
+        `).join("")}
+      </div>
+    </section>
+  `;
 }
 
 function getRiskSourceExcerpt(risk) {
@@ -1890,25 +2239,37 @@ function renderHumanReviewPanel(contract) {
       </div>
     `;
   }
-  if (contract.status !== "NeedHumanConfirm") {
+  const reviewableStatuses = new Set(["NeedHumanConfirm", "NeedRevision", "Blocked"]);
+  if (!reviewableStatuses.has(contract.status)) {
     return "";
   }
+  const statusCopy = getHumanReviewStatusCopy(contract);
   const defaultOpinion = contract.report?.default_human_review_opinion || buildDefaultHumanReviewOpinion(contract);
   const opinionSource = contract.report?.default_human_review_opinion_source === "glm" ? "GLM 已根据最终审查报告生成默认意见，可人工修改。" : "已根据最终审查报告生成默认意见，可人工修改。";
   return `
     <div class="human-review-panel">
       <div class="human-review-head">
-        <b>人工审核</b>
-        <span>等待确认</span>
+        <b>${escapeHtml(statusCopy.title)}</b>
+        <span>${escapeHtml(statusCopy.status)}</span>
       </div>
       <p class="human-review-tip">${escapeHtml(opinionSource)}</p>
       <textarea id="humanReviewOpinion" placeholder="填写人工审核意见，如：请补充付款节点、发票税率及双方签章生效条款后再流转。">${escapeHtml(defaultOpinion)}</textarea>
       <div class="human-review-actions">
         <button class="danger-btn" id="ignoreRiskBtn">忽略风险，审核通过</button>
-        <button class="primary-btn" id="approveBtn">提交意见</button>
+        <button class="primary-btn" id="approveBtn">${escapeHtml(statusCopy.submitLabel)}</button>
       </div>
     </div>
   `;
+}
+
+function getHumanReviewStatusCopy(contract) {
+  if (contract.status === "NeedRevision") {
+    return { title: "人工修改意见", status: "等待退回意见", submitLabel: "提交退回意见" };
+  }
+  if (contract.status === "Blocked") {
+    return { title: "人工处理意见", status: "等待风险解除意见", submitLabel: "提交处理意见" };
+  }
+  return { title: "人工审核", status: "等待确认", submitLabel: "提交意见" };
 }
 
 function buildDefaultHumanReviewOpinion(contract) {
@@ -2045,6 +2406,7 @@ els.refreshBtn.addEventListener("click", () => loadContracts().catch((error) => 
 els.knowledgeBtn.addEventListener("click", () => openKnowledgeModal().catch((error) => toast(error.message)));
 els.closeKnowledgeBtn.addEventListener("click", () => els.knowledgeModal.classList.add("hidden"));
 els.refreshKnowledgeBtn.addEventListener("click", () => loadKnowledge(true).then(() => toast("知识库索引已刷新。")).catch((error) => toast(error.message)));
+els.knowledgeFileInput.addEventListener("change", () => uploadKnowledgeFile(els.knowledgeFileInput.files[0]).catch((error) => toast(error.message)));
 els.knowledgeSearchBtn.addEventListener("click", () => searchKnowledge().catch((error) => toast(error.message)));
 els.knowledgeClearSearchBtn.addEventListener("click", () => {
   state.knowledgeQuery = "";
@@ -2058,6 +2420,9 @@ els.knowledgeSearchInput.addEventListener("keydown", (event) => {
     searchKnowledge().catch((error) => toast(error.message));
   }
 });
+els.feedbackBtn.addEventListener("click", () => openFeedbackModal().catch((error) => toast(error.message)));
+els.closeFeedbackBtn.addEventListener("click", () => els.feedbackModal.classList.add("hidden"));
+els.refreshFeedbackBtn.addEventListener("click", () => loadHumanFeedback().then(() => toast("人工反馈已刷新。")).catch((error) => toast(error.message)));
 els.agentsBtn.addEventListener("click", () => openAgentsModal().catch((error) => toast(error.message)));
 els.flowStrategiesBtn.addEventListener("click", () => openFlowStrategiesModal().catch((error) => toast(error.message)));
 els.closeFlowStrategiesBtn.addEventListener("click", () => els.flowStrategiesModal.classList.add("hidden"));

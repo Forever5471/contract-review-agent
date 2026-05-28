@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import json
 import shutil
-from typing import List, Union
+from pathlib import Path
+from typing import Any, List, Optional, Union
 from uuid import uuid4
 
 from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, UploadFile
@@ -32,7 +33,7 @@ from .flow_strategies import (
 )
 from .llm import build_llm_client, get_llm_status
 from .rules import delete_rule, get_rule, list_rules, normalize_rule, reset_rules, save_rule
-from .storage import JsonStore, ROOT_DIR, UPLOAD_DIR, now_iso
+from .storage import JsonStore, ROOT_DIR, UPLOAD_DIR, WORKSPACE_DIR, now_iso
 from .strategies import (
     delete_strategy,
     get_strategy,
@@ -51,6 +52,7 @@ intake_skill = ContractIntakeSkill()
 understanding_skill = ContractUnderstandingSkill()
 knowledge_tool = LocalRagTool()
 agent = ContractReviewAgent(store)
+KNOWLEDGE_FILE_SUFFIXES = {".docx", ".doc", ".pdf", ".md", ".txt"}
 
 
 class HumanReviewRequest(BaseModel):
@@ -243,6 +245,66 @@ def knowledge_search(q: str = "", top_k: int = 8) -> dict:
     }
 
 
+@app.post("/api/knowledge/upload")
+def knowledge_upload(category: str = Form(...), file: UploadFile = File(...)) -> dict:
+    category_name = category.strip()
+    if category_name not in knowledge_tool.categories():
+        raise HTTPException(status_code=400, detail="不支持的知识分类")
+    original_name = Path(file.filename or "").name.strip()
+    suffix = Path(original_name).suffix.lower()
+    if suffix not in KNOWLEDGE_FILE_SUFFIXES:
+        raise HTTPException(status_code=400, detail="仅支持 Word、PDF、TXT、MD 文件")
+    safe_name = _safe_filename(original_name) or f"knowledge-{uuid4().hex}{suffix}"
+    target_dir = WORKSPACE_DIR / category_name
+    target_dir.mkdir(parents=True, exist_ok=True)
+    target_path = target_dir / safe_name
+    if target_path.exists():
+        target_path = target_dir / f"{target_path.stem}-{uuid4().hex[:8]}{target_path.suffix}"
+    with target_path.open("wb") as target:
+        shutil.copyfileobj(file.file, target)
+    knowledge = knowledge_tool.list_entries(refresh=True)
+    return {
+        "ok": True,
+        "item": {
+            "category": category_name,
+            "source": str(target_path.relative_to(WORKSPACE_DIR)),
+            "title": target_path.name,
+        },
+        "knowledge": knowledge,
+    }
+
+
+@app.get("/api/human-feedback")
+def human_feedback_list() -> dict:
+    items = _build_human_feedback_items(store.list_contracts())
+    reject_count = sum(1 for item in items if item.get("action") == "reject")
+    approve_count = sum(1 for item in items if item.get("action") == "approve")
+    with_opinion_count = sum(1 for item in items if item.get("opinion"))
+    rule_counts: dict[str, dict[str, Any]] = {}
+    for item in items:
+        for risk in item.get("risks", []):
+            rule_id = str(risk.get("rule_id") or "").strip()
+            if not rule_id:
+                continue
+            rule_counts.setdefault(
+                rule_id,
+                {"rule_id": rule_id, "rule_name": risk.get("rule_name") or rule_id, "count": 0},
+            )
+            rule_counts[rule_id]["count"] += 1
+    top_rules = sorted(rule_counts.values(), key=lambda entry: entry["count"], reverse=True)[:8]
+    return {
+        "items": items,
+        "summary": {
+            "total": len(items),
+            "approve_count": approve_count,
+            "reject_count": reject_count,
+            "with_opinion_count": with_opinion_count,
+            "contract_count": len({item.get("contract_id") for item in items}),
+            "top_rules": top_rules,
+        },
+    }
+
+
 @app.post("/api/rules/debug")
 def rule_debug(rule_json: str = Form(...), file: UploadFile = File(...)) -> dict:
     try:
@@ -272,6 +334,7 @@ def rule_debug(rule_json: str = Form(...), file: UploadFile = File(...)) -> dict
             understanding["text"],
             understanding["contract_type"],
             understanding["fields"],
+            understanding.get("clauses") or [],
         )
     finally:
         temp_path.unlink(missing_ok=True)
@@ -281,6 +344,7 @@ def rule_debug(rule_json: str = Form(...), file: UploadFile = File(...)) -> dict
         "understanding": {
             "contract_type": understanding["contract_type"],
             "fields": understanding["fields"],
+            "clauses": understanding.get("clauses") or [],
             "preview": understanding["preview"],
             "confidence_detail": understanding.get("confidence_detail"),
         },
@@ -526,6 +590,160 @@ def human_review(contract_id: str, payload: HumanReviewRequest) -> dict:
     return {"ok": True, "item": _summarize(updated)}
 
 
+def _build_human_feedback_items(contracts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    seen: set[tuple[str, str, str, str]] = set()
+    for contract in contracts:
+        events = ((contract.get("review") or {}).get("events") or [])
+        for index, event in enumerate(events):
+            feedback = event.get("human_review")
+            if event.get("event_type") != "human_review" or not isinstance(feedback, dict):
+                continue
+            key = _human_feedback_key(contract, feedback, event.get("time"))
+            seen.add(key)
+            items.append(_build_human_feedback_item(contract, feedback, event.get("time"), index))
+
+        latest_feedback = contract.get("human_review")
+        if isinstance(latest_feedback, dict):
+            event_time = latest_feedback.get("time") or contract.get("updated_at") or contract.get("created_at")
+            key = _human_feedback_key(contract, latest_feedback, event_time)
+            if key not in seen:
+                items.append(_build_human_feedback_item(contract, latest_feedback, event_time, len(events)))
+
+    return sorted(items, key=lambda item: item.get("time") or "", reverse=True)
+
+
+def _human_feedback_key(
+    contract: dict[str, Any],
+    feedback: dict[str, Any],
+    event_time: Optional[str],
+) -> tuple[str, str, str, str]:
+    return (
+        str(contract.get("id") or ""),
+        str(event_time or feedback.get("time") or ""),
+        str(feedback.get("action") or ""),
+        str(feedback.get("opinion") or ""),
+    )
+
+
+def _build_human_feedback_item(
+    contract: dict[str, Any],
+    feedback: dict[str, Any],
+    event_time: Optional[str],
+    index: int,
+) -> dict[str, Any]:
+    fields = contract.get("fields") or {}
+    risks = [_human_feedback_risk(risk) for risk in contract.get("risks") or []]
+    report = contract.get("report") or {}
+    rule_events = report.get("rule_events") or []
+    passed_rules = [
+        {
+            "rule_id": event.get("rule_id"),
+            "rule_name": event.get("rule_name"),
+            "mode": event.get("mode"),
+            "priority": event.get("priority"),
+            "risk_level": event.get("risk_level"),
+        }
+        for event in rule_events
+        if event.get("passed")
+    ]
+    matched_clauses = _unique_feedback_clauses(risks)
+    review_strategy = contract.get("review_strategy") or {}
+    flow_decision = contract.get("flow_decision") or {}
+    time = str(event_time or feedback.get("time") or contract.get("updated_at") or "")
+    return {
+        "id": f"{contract.get('id', 'contract')}-feedback-{index}",
+        "contract_id": contract.get("id"),
+        "contract_name": contract.get("name"),
+        "contract_type": contract.get("contract_type"),
+        "status": contract.get("status"),
+        "status_text": contract.get("status_text"),
+        "created_at": contract.get("created_at"),
+        "updated_at": contract.get("updated_at"),
+        "business_dept": contract.get("business_dept"),
+        "initiator": contract.get("initiator"),
+        "source": contract.get("source"),
+        "max_amount": fields.get("max_amount"),
+        "action": feedback.get("action"),
+        "decision": feedback.get("decision"),
+        "opinion": str(feedback.get("opinion") or "").strip(),
+        "reviewer": feedback.get("reviewer") or "人工审核人",
+        "time": time,
+        "review_strategy": {
+            "id": review_strategy.get("id"),
+            "name": review_strategy.get("name"),
+            "template_type": review_strategy.get("template_type"),
+        },
+        "flow_decision": {
+            "decision": flow_decision.get("decision"),
+            "status": flow_decision.get("status"),
+            "status_text": flow_decision.get("status_text"),
+            "reason": flow_decision.get("reason"),
+            "flow_strategy": (flow_decision.get("flow_strategy") or {}).get("name"),
+        },
+        "risk_summary": {
+            "total": len(risks),
+            "p0": sum(1 for risk in risks if risk.get("priority") == "P0"),
+            "p1": sum(1 for risk in risks if risk.get("priority") == "P1"),
+            "general": sum(1 for risk in risks if risk.get("priority") in {"P2", "P3"}),
+        },
+        "risks": risks,
+        "passed_rules": passed_rules,
+        "matched_clauses": matched_clauses,
+        "default_opinion": report.get("default_human_review_opinion"),
+        "report_summary": report.get("summary"),
+        "report_conclusion": report.get("conclusion"),
+    }
+
+
+def _human_feedback_risk(risk: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "rule_id": risk.get("rule_id"),
+        "rule_name": risk.get("rule_name"),
+        "mode": risk.get("mode"),
+        "priority": risk.get("priority"),
+        "risk_level": risk.get("risk_level"),
+        "issue": risk.get("issue"),
+        "suggestion": risk.get("suggestion"),
+        "source_excerpt": _risk_source_excerpt(risk),
+        "matched_clauses": (risk.get("matched_clauses") or [])[:5],
+    }
+
+
+def _risk_source_excerpt(risk: dict[str, Any]) -> str:
+    for evidence in risk.get("evidence") or []:
+        if isinstance(evidence, dict) and evidence.get("snippet"):
+            return str(evidence.get("snippet"))
+    matched_clauses = risk.get("matched_clauses") or []
+    if matched_clauses and isinstance(matched_clauses[0], dict):
+        return str(matched_clauses[0].get("text") or "")
+    return str(risk.get("issue") or "")
+
+
+def _unique_feedback_clauses(risks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    clauses: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for risk in risks:
+        for clause in risk.get("matched_clauses") or []:
+            if not isinstance(clause, dict):
+                continue
+            clause_id = str(clause.get("id") or clause.get("title") or clause.get("text") or "")
+            if not clause_id or clause_id in seen:
+                continue
+            seen.add(clause_id)
+            clauses.append(
+                {
+                    "id": clause.get("id"),
+                    "number": clause.get("number"),
+                    "title": clause.get("title"),
+                    "type": clause.get("type"),
+                    "location": clause.get("location"),
+                    "text": clause.get("text"),
+                }
+            )
+    return clauses[:10]
+
+
 def _summarize(contract: dict) -> dict:
     risks = contract.get("risks") or []
     return {
@@ -549,6 +767,13 @@ def _model_to_dict(model: BaseModel) -> dict:
     if hasattr(model, "model_dump"):
         return model.model_dump()
     return model.dict()
+
+
+def _safe_filename(filename: str) -> str:
+    name = Path(filename).name.strip().replace("\x00", "")
+    for char in '\\/:*?"<>|':
+        name = name.replace(char, "_")
+    return name[:180]
 
 
 def _public_agent_response(agent_item: dict) -> dict:

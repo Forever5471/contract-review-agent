@@ -15,6 +15,9 @@ class LocalRagTool:
     def __init__(self) -> None:
         self._index: list[dict[str, Any]] | None = None
 
+    def categories(self) -> list[str]:
+        return ["规章制度", "合同模板", "历史合同"]
+
     def list_entries(self, refresh: bool = False) -> dict[str, Any]:
         if refresh:
             self._index = None
@@ -36,7 +39,7 @@ class LocalRagTool:
             if not entry["preview"]:
                 entry["preview"] = item["text"][:520]
         categories = []
-        for category in self._categories():
+        for category in self.categories():
             root = WORKSPACE_DIR / category
             category_items = [item for item in grouped.values() if item["category"] == category]
             categories.append(
@@ -90,7 +93,7 @@ class LocalRagTool:
         if self._index is not None:
             return self._index
         items: list[dict[str, Any]] = []
-        for category in self._categories():
+        for category in self.categories():
             root = WORKSPACE_DIR / category
             if not root.exists():
                 continue
@@ -113,9 +116,6 @@ class LocalRagTool:
                     )
         self._index = items
         return items
-
-    def _categories(self) -> list[str]:
-        return ["规章制度", "合同模板", "历史合同"]
 
     def _score(self, text: str, terms: list[str], query: str) -> float:
         if not text:

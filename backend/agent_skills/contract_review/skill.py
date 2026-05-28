@@ -25,9 +25,10 @@ class ContractReviewSkill:
         text: str,
         contract_type: str,
         fields: dict[str, Any],
+        clauses: list[dict[str, Any]] | None = None,
         strategy: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        rule_result = self.rule_engine.run(text, contract_type, fields, strategy=strategy)
+        rule_result = self.rule_engine.run(text, contract_type, fields, clauses=clauses, strategy=strategy)
         return {
             "skill_name": self.name,
             "skill_version": self.version,

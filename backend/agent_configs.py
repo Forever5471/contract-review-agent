@@ -22,6 +22,7 @@ SKILL_DIRS = {
 TOOL_FILES = {
     "DocumentParseTool": ROOT_DIR / "backend/tools/parse_document.py",
     "ContractClassifyTool": ROOT_DIR / "backend/tools/classify_contract.py",
+    "ClauseExtractTool": ROOT_DIR / "backend/tools/extract_clauses.py",
     "FieldExtractTool": ROOT_DIR / "backend/tools/extract_fields.py",
     "TemplateMatchTool": ROOT_DIR / "backend/tools/match_template.py",
     "RuleEngineTool": ROOT_DIR / "backend/tools/execute_rules.py",
@@ -42,10 +43,10 @@ SKILL_CATALOG: list[dict[str, Any]] = [
     {
         "id": "ContractUnderstandingSkill",
         "name": "合同理解技能",
-        "description": "解析合同文本、识别合同类型、抽取结构化字段并完成模板匹配。",
+        "description": "解析合同文本、识别合同类型、抽取条款对象和结构化字段并完成模板匹配。",
         "inputs": ["contract.file_path", "contract.file_name"],
-        "outputs": ["text", "contract_type", "fields", "template_match"],
-        "tools": ["DocumentParseTool", "ContractClassifyTool", "FieldExtractTool", "TemplateMatchTool"],
+        "outputs": ["text", "contract_type", "clauses", "fields", "template_match"],
+        "tools": ["DocumentParseTool", "ContractClassifyTool", "ClauseExtractTool", "FieldExtractTool", "TemplateMatchTool"],
     },
     {
         "id": "ContractReviewSkill",
@@ -68,6 +69,7 @@ SKILL_CATALOG: list[dict[str, Any]] = [
 TOOL_CATALOG: list[dict[str, Any]] = [
     {"id": "DocumentParseTool", "name": "文档解析工具", "description": "读取 TXT/MD/PDF/Word 文件并生成合同文本预览。", "used_by": ["ContractUnderstandingSkill"]},
     {"id": "ContractClassifyTool", "name": "合同分类工具", "description": "根据文件名和正文关键词识别合同类型。", "used_by": ["ContractUnderstandingSkill"]},
+    {"id": "ClauseExtractTool", "name": "条款抽取工具", "description": "把合同正文拆分为条款对象，包含编号、标题、类型、原文和位置。", "used_by": ["ContractUnderstandingSkill", "ContractReviewSkill"]},
     {"id": "FieldExtractTool", "name": "字段抽取工具", "description": "抽取主体、金额、付款、发票、签章、生效、安全、违约等结构化字段。", "used_by": ["ContractUnderstandingSkill"]},
     {"id": "TemplateMatchTool", "name": "模板匹配工具", "description": "按合同类型检查标准章节覆盖情况，输出匹配度和缺失章节。", "used_by": ["ContractUnderstandingSkill"]},
     {"id": "RuleEngineTool", "name": "规则引擎工具", "description": "执行审核策略关联的脚本规则和指令规则。", "used_by": ["ContractReviewSkill"]},
@@ -93,6 +95,7 @@ DEFAULT_AGENTS: list[dict[str, Any]] = [
         "tools": [
             "DocumentParseTool",
             "ContractClassifyTool",
+            "ClauseExtractTool",
             "FieldExtractTool",
             "TemplateMatchTool",
             "RuleEngineTool",
