@@ -215,6 +215,7 @@ const els = {
   agentToolSearch: $("#agentToolSearch"),
   agentModelProvider: $("#agentModelProvider"),
   agentModelName: $("#agentModelName"),
+  agentModelBaseUrl: $("#agentModelBaseUrl"),
   agentTemperature: $("#agentTemperature"),
   agentModelApiKey: $("#agentModelApiKey"),
   agentModelApiKeyStatus: $("#agentModelApiKeyStatus"),
@@ -723,8 +724,9 @@ function selectAgent(agentId) {
   state.agentToolIds = [...(agent.tools || [])];
   state.selectedAgentToolId = state.agentToolIds[0] || state.availableTools[0]?.id || null;
   renderAgentTools();
-  els.agentModelProvider.value = agent.model?.provider || "glm";
-  els.agentModelName.value = agent.model?.model || "glm-5";
+  els.agentModelProvider.value = agent.model?.provider || "openai-compatible";
+  els.agentModelName.value = agent.model?.model || "";
+  els.agentModelBaseUrl.value = agent.model?.base_url || "";
   els.agentTemperature.value = agent.model?.temperature ?? 0.2;
   els.agentModelApiKey.value = "";
   renderAgentApiKeyStatus(agent);
@@ -750,8 +752,9 @@ function startNewAgent() {
   state.agentToolIds = [];
   state.selectedAgentToolId = state.availableTools[0]?.id || null;
   renderAgentTools();
-  els.agentModelProvider.value = "glm";
-  els.agentModelName.value = "glm-5";
+  els.agentModelProvider.value = "openai-compatible";
+  els.agentModelName.value = "";
+  els.agentModelBaseUrl.value = "";
   els.agentTemperature.value = 0.2;
   els.agentModelApiKey.value = "";
   renderAgentApiKeyStatus(null);
@@ -1034,6 +1037,7 @@ function collectAgentForm() {
     model: {
       provider: els.agentModelProvider.value.trim(),
       model: els.agentModelName.value.trim(),
+      base_url: els.agentModelBaseUrl.value.trim(),
       temperature: Number(els.agentTemperature.value || 0.2),
       api_key: els.agentModelApiKey.value.trim(),
       enabled: els.agentModelEnabled.checked,
@@ -2245,7 +2249,10 @@ function renderHumanReviewPanel(contract) {
   }
   const statusCopy = getHumanReviewStatusCopy(contract);
   const defaultOpinion = contract.report?.default_human_review_opinion || buildDefaultHumanReviewOpinion(contract);
-  const opinionSource = contract.report?.default_human_review_opinion_source === "glm" ? "GLM 已根据最终审查报告生成默认意见，可人工修改。" : "已根据最终审查报告生成默认意见，可人工修改。";
+  const humanOpinionSource = contract.report?.default_human_review_opinion_source;
+  const opinionSource = humanOpinionSource && humanOpinionSource !== "template"
+    ? "大模型已根据最终审查报告生成默认意见，可人工修改。"
+    : "已根据最终审查报告生成默认意见，可人工修改。";
   return `
     <div class="human-review-panel">
       <div class="human-review-head">

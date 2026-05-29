@@ -133,12 +133,20 @@ def llm_status() -> dict:
     runtime_agent = get_agent("contract-review-main")
     model = (runtime_agent or {}).get("model") or {}
     tools = set((runtime_agent or {}).get("tools") or [])
-    configured = bool("LLMClient" in tools and model.get("enabled") and model.get("api_key") and model.get("provider") == "glm")
+    configured = bool(
+        "LLMClient" in tools
+        and model.get("enabled")
+        and model.get("api_key")
+        and model.get("provider")
+        and model.get("model")
+        and (model.get("base_url") or model.get("provider") == "glm")
+    )
     if configured:
         return {
             "configured": True,
             "provider": model.get("provider"),
             "model": model.get("model"),
+            "base_url": model.get("base_url"),
             "api_key_set": True,
             "source": "agent_config",
         }

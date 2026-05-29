@@ -33,9 +33,9 @@ http://127.0.0.1:8123
 python3 run_local_server.py
 ```
 
-## 配置 GLM
+## 配置通用大模型
 
-当前支持把指令模式规则接到 GLM Chat Completion。复制 `.env.example` 为 `.env.local`，并填写本地密钥：
+当前的大模型接入按 OpenAI-compatible Chat Completions 协议设计，GLM、DeepSeek、OpenAI-compatible 网关或企业内部模型服务都可以通过统一的 `provider`、`model`、`base_url` 和 `api_key` 配置接入。复制 `.env.example` 为 `.env.local`，并填写本地密钥：
 
 ```bash
 cp .env.example .env.local
@@ -44,11 +44,13 @@ cp .env.example .env.local
 `.env.local` 示例：
 
 ```text
-LLM_PROVIDER=glm
-GLM_API_KEY=replace-with-your-glm-api-key
-GLM_MODEL=glm-5
-GLM_BASE_URL=https://api.z.ai/api/paas/v4
+LLM_PROVIDER=openai-compatible
+LLM_API_KEY=replace-with-your-llm-api-key
+LLM_MODEL=replace-with-your-chat-model
+LLM_BASE_URL=https://your-provider.example/v1
 ```
+
+如果使用 GLM，也可以把 `LLM_PROVIDER` 设置为 `glm`，并使用 GLM 的模型名和 Base URL。旧的 `GLM_API_KEY`、`GLM_MODEL`、`GLM_BASE_URL` 变量仍兼容。
 
 接口 `/api/llm/status` 可查看模型配置状态，不会返回 API Key 明文。
 
@@ -56,84 +58,87 @@ GLM_BASE_URL=https://api.z.ai/api/paas/v4
 
 ```mermaid
 flowchart TB
-  user["业务经办人 / 法务 / 财务 / 审核人员"]
+  classDef role fill:#E0F2FE,stroke:#0284C7,color:#0F172A,stroke-width:1px
+  classDef ui fill:#DBEAFE,stroke:#2563EB,color:#0F172A,stroke-width:1px
+  classDef config fill:#FCE7F3,stroke:#DB2777,color:#0F172A,stroke-width:1px
+  classDef agent fill:#EDE9FE,stroke:#7C3AED,color:#0F172A,stroke-width:1px
+  classDef tool fill:#DCFCE7,stroke:#16A34A,color:#0F172A,stroke-width:1px
+  classDef data fill:#FEF3C7,stroke:#D97706,color:#0F172A,stroke-width:1px
+  classDef learn fill:#FFE4E6,stroke:#E11D48,color:#0F172A,stroke-width:1px
 
-  subgraph frontend["前端工作台"]
-    upload["合同上传与合同库"]
-    preview["合同预览与审核依据"]
-    result["审查结果与人工确认"]
-    rule_ui["规则配置"]
-    strategy_ui["审核策略"]
-    flow_ui["流转策略"]
-    agent_ui["智能体管理"]
-    kb_ui["知识库"]
-    feedback_ui["反馈学习"]
+  subgraph L1["用户与角色层"]
+    direction LR
+    r1(["业务经办人"])
+    r2(["法务审核"])
+    r3(["财务审核"])
+    r4(["规则运营"])
+    r5(["流程管理员"])
   end
 
-  subgraph api["FastAPI 后端"]
-    contract_api["合同 API"]
-    rules_api["规则 API"]
-    strategy_api["审核策略 API"]
-    flow_api["流转策略 API"]
-    agent_api["智能体配置 API"]
-    kb_api["知识库 API"]
-    feedback_api["人工反馈 API"]
+  subgraph L2["前端交互层"]
+    direction LR
+    u1(["合同上传"])
+    u2(["合同预览"])
+    u3(["审核结果"])
+    u4(["人工确认"])
+    u5(["反馈学习"])
   end
 
-  subgraph agent["合同智审主智能体"]
-    intake["ContractIntakeSkill 入库"]
-    understanding["ContractUnderstandingSkill 理解"]
-    review["ContractReviewSkill 审查"]
-    reporting["ReviewReportingSkill 报告"]
+  subgraph L3["配置治理层"]
+    direction LR
+    c1(["智能体管理"])
+    c2(["规则配置"])
+    c3(["审核策略"])
+    c4(["流转策略"])
+    c5(["知识库管理"])
   end
 
-  subgraph tools["工具层"]
-    parse["DocumentParseTool 文档解析"]
-    clause["ClauseExtractTool 条款抽取"]
-    classify["ContractClassifyTool 类型识别"]
-    fields["FieldExtractTool 字段抽取"]
-    template["TemplateMatchTool 模板匹配"]
-    rules["RuleEngineTool 规则执行"]
-    rag["LocalRagTool 本地 RAG"]
-    llm["LLMClient 指令判断与意见生成"]
+  subgraph L4["智能体编排层"]
+    direction LR
+    a1(["合同入库 Skill"])
+    a2(["合同理解 Skill"])
+    a3(["规则审核 Skill"])
+    a4(["报告生成 Skill"])
   end
 
-  subgraph data["本地数据与知识"]
-    store["data/store.json 合同库"]
-    rules_file["data/rules.json 规则"]
-    strategies_file["data/strategies.json 审核策略"]
-    flows_file["data/flow_strategies.json 流转策略"]
-    agents_file["data/agents.json 智能体配置"]
-    knowledge["规章制度 / 合同模板 / 历史合同"]
+  subgraph L5["工具与模型层"]
+    direction LR
+    t1(["文档解析"])
+    t2(["条款抽取"])
+    t3(["字段抽取"])
+    t4(["模板匹配"])
+    t5(["规则引擎"])
+    t6(["本地 RAG"])
+    t7(["通用大模型"])
   end
 
-  user --> frontend
-  frontend --> api
-  contract_api --> agent
-  rules_api --> rules_file
-  strategy_api --> strategies_file
-  flow_api --> flows_file
-  agent_api --> agents_file
-  kb_api --> knowledge
-  feedback_api --> store
+  subgraph L6["数据与知识层"]
+    direction LR
+    d1(["合同库"])
+    d2(["规则库"])
+    d3(["策略库"])
+    d4(["智能体配置"])
+    d5(["规章制度"])
+    d6(["合同模板"])
+    d7(["历史合同"])
+  end
 
-  agent --> intake --> store
-  agent --> understanding
-  agent --> review
-  agent --> reporting --> store
+  subgraph L7["闭环学习层"]
+    direction LR
+    l1(["人工反馈"])
+    l2(["高频问题"])
+    l3(["候选规则"])
+    l4(["回放验证"])
+    l5(["人工发布"])
+  end
 
-  understanding --> parse
-  understanding --> clause
-  understanding --> classify
-  understanding --> fields
-  understanding --> template
-  review --> rules
-  review --> rag
-  review --> llm
-  rag --> knowledge
-  rules --> rules_file
-  rules --> strategies_file
-  reporting --> flow_api
+  class r1,r2,r3,r4,r5 role
+  class u1,u2,u3,u4,u5 ui
+  class c1,c2,c3,c4,c5 config
+  class a1,a2,a3,a4 agent
+  class t1,t2,t3,t4,t5,t6,t7 tool
+  class d1,d2,d3,d4,d5,d6,d7 data
+  class l1,l2,l3,l4,l5 learn
 ```
 
 ## 用户故事图
@@ -202,5 +207,5 @@ flowchart LR
 
 - 文档解析：当前以轻量解析为主，生产环境可替换为 OCR、版面解析和表格解析服务。
 - RAG：当前使用本地轻量检索，生产环境可替换为向量数据库和权限隔离知识库。
-- LLM：当前支持 GLM 配置，后续可增加多模型路由、调用审计和成本控制。
+- LLM：当前支持 OpenAI-compatible Chat Completions 风格的通用大模型接入，后续可增加多模型路由、调用审计和成本控制。
 - 规则学习：当前已展示人工反馈样本池，后续可继续实现反馈聚类、候选规则生成、历史合同回放验证和人工发布流程。

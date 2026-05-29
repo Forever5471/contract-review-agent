@@ -52,7 +52,7 @@ class RuleEngineTool:
                 "risks": risks,
                 "rule_events": rule_events,
                 "llm_enabled": self.llm is not None,
-                "llm_provider": "glm" if self.llm is not None else None,
+                "llm_provider": getattr(getattr(self.llm, "config", None), "provider", None) if self.llm is not None else None,
                 "llm_model": getattr(self.llm, "model", None),
                 "confidence_detail": confidence_detail,
                 "review_strategy": self._strategy_summary(strategy, rules),
@@ -99,7 +99,7 @@ class RuleEngineTool:
                 "rule_event": result,
                 "risks": [] if result["passed"] else [result],
                 "llm_enabled": self.llm is not None,
-                "llm_provider": "glm" if self.llm is not None else None,
+                "llm_provider": getattr(getattr(self.llm, "config", None), "provider", None) if self.llm is not None else None,
                 "llm_model": getattr(self.llm, "model", None),
                 "confidence_detail": confidence_detail,
             },
@@ -802,7 +802,7 @@ class RuleEngineTool:
 
         judgement = result.get("json") or {}
         if "passed" not in judgement:
-            return {"ok": False, "error": "GLM JSON 缺少 passed 字段。"}
+            return {"ok": False, "error": "大模型 JSON 缺少 passed 字段。"}
         return {
             "ok": True,
             "provider": result.get("provider"),

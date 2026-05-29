@@ -33,7 +33,7 @@ class ReviewReportingSkill:
         else:
             report["llm_summary_used"] = False
             if llm_summary.get("error"):
-                warnings.append(f"最终结果 GLM 润色未生效，已使用模板摘要：{llm_summary['error']}")
+                warnings.append(f"最终结果大模型润色未生效，已使用模板摘要：{llm_summary['error']}")
 
         human_opinion = self._draft_human_review_opinion(contract, risks, report)
         report["default_human_review_opinion"] = human_opinion["opinion"]
@@ -43,7 +43,7 @@ class ReviewReportingSkill:
             report["human_opinion_llm_model"] = human_opinion.get("model")
             report["human_opinion_llm_request_id"] = human_opinion.get("request_id")
         if human_opinion.get("error"):
-            warnings.append(f"默认人工审核意见 GLM 生成未生效，已使用规则兜底意见：{human_opinion['error']}")
+            warnings.append(f"默认人工审核意见大模型生成未生效，已使用规则兜底意见：{human_opinion['error']}")
 
         confidence = self._calculate_skill_confidence(report, warnings)
         return {
@@ -203,7 +203,7 @@ class ReviewReportingSkill:
 
         summary = str((result.get("json") or {}).get("summary") or "").strip()
         if not summary:
-            return {"ok": False, "error": "GLM JSON 缺少 summary 字段。"}
+            return {"ok": False, "error": "大模型 JSON 缺少 summary 字段。"}
         return {
             "ok": True,
             "summary": summary[:260],
@@ -287,7 +287,7 @@ class ReviewReportingSkill:
                 "ok": False,
                 "source": "template",
                 "opinion": fallback,
-                "error": result.get("error", "GLM 调用失败"),
+                "error": result.get("error", "大模型调用失败"),
             }
 
         opinion = str((result.get("json") or {}).get("opinion") or "").strip()
@@ -296,11 +296,11 @@ class ReviewReportingSkill:
                 "ok": False,
                 "source": "template",
                 "opinion": fallback,
-                "error": "GLM JSON 缺少 opinion 字段。",
+                "error": "大模型 JSON 缺少 opinion 字段。",
             }
         return {
             "ok": True,
-            "source": "glm",
+            "source": result.get("provider") or "llm",
             "opinion": opinion[:500],
             "provider": result.get("provider"),
             "model": result.get("model"),

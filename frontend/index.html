@@ -666,11 +666,15 @@
             </section>
             <label>
               大模型供应商
-              <input id="agentModelProvider" placeholder="如：glm" />
+              <input id="agentModelProvider" placeholder="如：openai-compatible、glm、deepseek" />
             </label>
             <label>
               大模型
-              <input id="agentModelName" placeholder="如：glm-5" />
+              <input id="agentModelName" placeholder="如：glm-5 或供应商模型名" />
+            </label>
+            <label>
+              API Base URL
+              <input id="agentModelBaseUrl" placeholder="如：https://api.example.com/v1" />
             </label>
             <label>
               Temperature

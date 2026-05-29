@@ -106,6 +106,7 @@ DEFAULT_AGENTS: list[dict[str, Any]] = [
         "model": {
             "provider": "glm",
             "model": "glm-5",
+            "base_url": "https://api.z.ai/api/paas/v4",
             "temperature": 0.2,
             "api_key": "",
             "enabled": False,
@@ -198,8 +199,9 @@ def normalize_agent(payload: dict[str, Any]) -> dict[str, Any]:
         "skills": _normalize_list(payload.get("skills")),
         "tools": _normalize_list(payload.get("tools")),
         "model": {
-            "provider": str(model.get("provider") or "glm").strip(),
-            "model": str(model.get("model") or "glm-5").strip(),
+            "provider": str(model.get("provider") or "openai-compatible").strip(),
+            "model": str(model.get("model") or "").strip(),
+            "base_url": str(model.get("base_url") or "").strip(),
             "temperature": _to_float(model.get("temperature"), 0.2),
             "api_key": str(model.get("api_key") or "").strip(),
             "enabled": bool(model.get("enabled", False)),
