@@ -42,6 +42,7 @@ const state = {
   resultFilter: "all",
   pollTimer: null,
   pollStableTicks: 0,
+  agentSaveResetTimer: null,
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -1083,8 +1084,10 @@ async function saveCurrentAgent(event) {
     ? `/api/agents/${encodeURIComponent(state.editingAgentOriginalId)}`
     : "/api/agents";
   const method = state.editingAgentOriginalId ? "PUT" : "POST";
+  window.clearTimeout(state.agentSaveResetTimer);
   setAgentSaveStatus("saving", "正在保存...");
   els.agentSaveBtn.disabled = true;
+  els.agentSaveBtn.textContent = "保存中...";
   try {
     const data = await api(path, {
       method,
@@ -1094,11 +1097,19 @@ async function saveCurrentAgent(event) {
     state.selectedAgentId = data.item.id;
     await loadAgents();
     setAgentSaveStatus("success", `保存成功：${data.item.name || data.item.id}`);
-    toast("智能体配置已保存，后续审核将使用该配置。");
+    els.agentSaveBtn.textContent = "已保存";
+    toast(`保存成功：${data.item.name || data.item.id}，后续审核将使用该配置。`, "success");
+    state.agentSaveResetTimer = window.setTimeout(() => {
+      els.agentSaveBtn.textContent = "保存智能体";
+    }, 1800);
   } catch (error) {
     const message = normalizeErrorMessage(error);
     setAgentSaveStatus("error", `保存失败：${message}`);
-    toast(`保存智能体失败：${message}`);
+    els.agentSaveBtn.textContent = "保存失败";
+    toast(`保存智能体失败：${message}`, "error");
+    state.agentSaveResetTimer = window.setTimeout(() => {
+      els.agentSaveBtn.textContent = "保存智能体";
+    }, 2200);
   } finally {
     els.agentSaveBtn.disabled = false;
   }
@@ -2663,9 +2674,9 @@ function escapeHtml(value) {
     .replaceAll("'", "&#039;");
 }
 
-function toast(message) {
+function toast(message, type = "") {
   const node = document.createElement("div");
-  node.className = "toast";
+  node.className = `toast ${type ? `toast-${type}` : ""}`;
   node.textContent = message;
   document.body.appendChild(node);
   setTimeout(() => node.remove(), 2600);

@@ -218,6 +218,11 @@ h2 {
   background: var(--blue);
 }
 
+.primary-btn:disabled {
+  opacity: .72;
+  cursor: wait;
+}
+
 .ghost-btn {
   border: 1px solid var(--line);
   color: #24405f;
@@ -932,7 +937,15 @@ textarea {
   color: #fff;
   font-size: 13px;
   box-shadow: 0 16px 36px rgba(0,0,0,.18);
-  z-index: 20;
+  z-index: 80;
+}
+
+.toast-success {
+  background: #047857;
+}
+
+.toast-error {
+  background: #b91c1c;
 }
 
 /* Review result panel styled after a contract review console. */
