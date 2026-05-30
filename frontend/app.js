@@ -2297,22 +2297,111 @@ function renderRiskMatchedClauses(risk) {
   return `
     <section class="risk-clause-block">
       <div class="risk-clause-head">
-        <b>命中条款</b>
+        <b>条款判定</b>
         <span>${clauses.length} 条</span>
       </div>
       <div class="risk-clause-list">
-        ${clauses.slice(0, 4).map((clause) => `
-          <article class="risk-clause-item">
+        ${clauses.map((clause) => {
+          const judgement = getClauseJudgement(risk, clause);
+          return `
+          <article class="risk-clause-item risk-clause-${judgement.status}">
             <div>
-              <b>${escapeHtml(clause.number || clause.id || "-")} ${escapeHtml(clause.title || "未命名条款")}</b>
+              <div class="risk-clause-title-row">
+                <b>${escapeHtml(clause.number || clause.id || "-")} ${escapeHtml(clause.title || "未命名条款")}</b>
+                <em class="clause-judgement-pill">${escapeHtml(judgement.label)}</em>
+              </div>
               <span>${escapeHtml(formatClauseType(clause.type))} · ${escapeHtml(clause.location || "-")}</span>
             </div>
             <p>${escapeHtml(clause.text || "")}</p>
+            <small>${escapeHtml(judgement.reason)}</small>
           </article>
-        `).join("")}
+        `;}).join("")}
       </div>
     </section>
   `;
+}
+
+function getClauseJudgement(risk, clause) {
+  if (clause.status || clause.status_label || clause.status_reason) {
+    return {
+      status: normalizeClauseStatus(clause.status),
+      label: clause.status_label || clauseStatusLabel(clause.status),
+      reason: clause.status_reason || clauseStatusReason(clause.status, risk),
+    };
+  }
+  if (risk.evaluated === false || risk.execution_status === "incomplete") {
+    return {
+      status: "unknown",
+      label: "未完成",
+      reason: "该规则未完成判断，暂不能判定该条款是否通过。",
+    };
+  }
+  if (risk.passed) {
+    return {
+      status: "passed",
+      label: "通过",
+      reason: "该条款与当前规则相关，未触发该规则风险。",
+    };
+  }
+  if (clauseMatchesRiskEvidence(risk, clause)) {
+    return {
+      status: "failed",
+      label: "触发风险",
+      reason: "该条款包含当前规则命中的直接证据。",
+    };
+  }
+  return {
+    status: "review",
+    label: "需复核",
+    reason: "该条款被规则召回为相关依据，需要结合规则结论复核。",
+  };
+}
+
+function normalizeClauseStatus(status) {
+  if (["passed", "failed", "review", "unknown"].includes(status)) return status;
+  if (status === "triggered" || status === "risk") return "failed";
+  if (status === "incomplete") return "unknown";
+  return "review";
+}
+
+function clauseStatusLabel(status) {
+  return {
+    passed: "通过",
+    failed: "触发风险",
+    review: "需复核",
+    unknown: "未完成",
+  }[normalizeClauseStatus(status)] || "需复核";
+}
+
+function clauseStatusReason(status, risk) {
+  const normalized = normalizeClauseStatus(status);
+  if (normalized === "passed") return "该条款与当前规则相关，未触发该规则风险。";
+  if (normalized === "failed") return "该条款包含当前规则命中的直接证据。";
+  if (normalized === "unknown") return "该规则未完成判断，暂不能判定该条款是否通过。";
+  return risk?.passed === false ? "该条款与当前未通过规则相关，需要人工复核。" : "该条款被规则召回为相关依据。";
+}
+
+function clauseMatchesRiskEvidence(risk, clause) {
+  const text = compactText(clause.text || "");
+  const clauseId = String(clause.id || "");
+  if (!text && !clauseId) return false;
+  return (risk.evidence || []).some((item) => {
+    if (!item || typeof item !== "object") return false;
+    if (clauseId && String(item.clause_id || "") === clauseId) return true;
+    const snippet = compactText(item.snippet || "");
+    if (snippet && (text.includes(snippet) || snippet.includes(text.slice(0, 80)))) return true;
+    if (typeof item.value === "string" && item.value.trim().length >= 2) {
+      return text.includes(compactText(item.value));
+    }
+    if (Array.isArray(item.value)) {
+      return item.value.some((value) => String(value || "").trim().length >= 2 && text.includes(compactText(value)));
+    }
+    return false;
+  });
+}
+
+function compactText(value) {
+  return String(value || "").replace(/\s+/g, "");
 }
 
 function getRiskSourceExcerpt(risk) {

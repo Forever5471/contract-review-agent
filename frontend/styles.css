@@ -1203,15 +1203,79 @@ textarea {
   padding: 8px;
 }
 
+.risk-clause-failed {
+  border-color: #fecaca;
+  background: #fff7f7;
+}
+
+.risk-clause-passed {
+  border-color: #bbf7d0;
+  background: #f8fff9;
+}
+
+.risk-clause-review {
+  border-color: #fed7aa;
+  background: #fffaf3;
+}
+
+.risk-clause-unknown {
+  border-color: #cbd5e1;
+  background: #f8fafc;
+}
+
+.risk-clause-title-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
 .risk-clause-item b,
 .risk-clause-item span {
   display: block;
 }
 
 .risk-clause-item b {
+  flex: 1;
   color: #172033;
   font-size: 12px;
   line-height: 1.4;
+}
+
+.clause-judgement-pill {
+  flex: 0 0 auto;
+  border-radius: 999px;
+  padding: 2px 7px;
+  background: #fff;
+  color: #64748b;
+  border: 1px solid #cbd5e1;
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 900;
+}
+
+.risk-clause-failed .clause-judgement-pill {
+  border-color: #fca5a5;
+  color: var(--red);
+  background: #fff1f2;
+}
+
+.risk-clause-passed .clause-judgement-pill {
+  border-color: #86efac;
+  color: var(--green);
+  background: #f0fdf4;
+}
+
+.risk-clause-review .clause-judgement-pill {
+  border-color: #fdba74;
+  color: var(--orange);
+  background: #fff7ed;
+}
+
+.risk-clause-unknown .clause-judgement-pill {
+  border-color: #cbd5e1;
+  color: #64748b;
+  background: #f8fafc;
 }
 
 .risk-clause-item span {
@@ -1229,6 +1293,14 @@ textarea {
   -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
   overflow: hidden;
+}
+
+.risk-clause-item small {
+  display: block;
+  margin-top: 6px;
+  color: #64748b;
+  font-size: 11px;
+  line-height: 1.45;
 }
 
 .risk-detail-block {

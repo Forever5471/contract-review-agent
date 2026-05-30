@@ -204,6 +204,15 @@ class RuleEngineTool:
             if source_excerpt:
                 evidence = [{"type": "source_excerpt", "snippet": source_excerpt}, *evidence]
 
+        matched_clauses = self._evaluate_clause_statuses(
+            rule=rule,
+            passed=passed,
+            evaluated=evaluated,
+            execution_status=execution_status,
+            issue=issue,
+            evidence=evidence,
+            relevant_clauses=relevant_clauses,
+        )
         return {
             "rule_id": rule_id,
             "rule_name": rule["name"],
@@ -219,7 +228,28 @@ class RuleEngineTool:
             "evidence": evidence,
             "warnings": warnings,
             "llm_used": llm_used,
-            "matched_clauses": [
+            "matched_clauses": matched_clauses,
+            "rule_inputs": rule_inputs,
+            "input_extraction": input_result.get("meta", {}),
+            **llm_meta,
+        }
+
+    def _evaluate_clause_statuses(
+        self,
+        rule: dict[str, Any],
+        passed: bool,
+        evaluated: bool,
+        execution_status: str,
+        issue: str,
+        evidence: list[dict[str, Any]],
+        relevant_clauses: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        if not relevant_clauses:
+            return []
+        clause_items = []
+        for clause in relevant_clauses[:5]:
+            status, label, reason = self._clause_status(rule, clause, passed, evaluated, execution_status, issue, evidence)
+            clause_items.append(
                 {
                     "id": clause.get("id"),
                     "number": clause.get("number"),
@@ -227,13 +257,74 @@ class RuleEngineTool:
                     "type": clause.get("type"),
                     "location": clause.get("location"),
                     "text": str(clause.get("text") or "")[:500],
+                    "status": status,
+                    "status_label": label,
+                    "status_reason": reason,
                 }
-                for clause in relevant_clauses[:5]
-            ],
-            "rule_inputs": rule_inputs,
-            "input_extraction": input_result.get("meta", {}),
-            **llm_meta,
-        }
+            )
+        return clause_items
+
+    def _clause_status(
+        self,
+        rule: dict[str, Any],
+        clause: dict[str, Any],
+        passed: bool,
+        evaluated: bool,
+        execution_status: str,
+        issue: str,
+        evidence: list[dict[str, Any]],
+    ) -> tuple[str, str, str]:
+        if not evaluated or execution_status == "incomplete":
+            return "unknown", "未完成", "该规则未完成判断，暂不能判定该条款是否通过。"
+        if passed:
+            return "passed", "通过", "该条款与当前规则相关，未触发该规则风险。"
+        if self._clause_matches_evidence(clause, evidence):
+            return "failed", "触发风险", "该条款包含当前规则命中的直接证据。"
+        if self._clause_matches_issue(clause, issue) or self._clause_matches_rule_keywords(rule, clause):
+            return "review", "需复核", "该条款与当前未通过规则高度相关，但未定位到单条款直接触发点。"
+        return "review", "需复核", "该条款被规则召回为相关依据，需要结合规则结论复核。"
+
+    def _clause_matches_evidence(self, clause: dict[str, Any], evidence: list[dict[str, Any]]) -> bool:
+        clause_id = str(clause.get("id") or "")
+        clause_text = str(clause.get("text") or "")
+        if not clause_text and not clause_id:
+            return False
+        for item in evidence:
+            if not isinstance(item, dict):
+                continue
+            if clause_id and str(item.get("clause_id") or "") == clause_id:
+                return True
+            snippet = str(item.get("snippet") or "").strip()
+            if snippet and self._text_overlaps(clause_text, snippet):
+                return True
+            value = item.get("value")
+            if isinstance(value, str) and len(value.strip()) >= 2 and value.strip() in clause_text:
+                return True
+            if isinstance(value, list) and any(str(val).strip() and str(val).strip() in clause_text for val in value):
+                return True
+        return False
+
+    def _clause_matches_issue(self, clause: dict[str, Any], issue: str) -> bool:
+        if not issue:
+            return False
+        clause_text = f"{clause.get('title', '')} {clause.get('type', '')} {clause.get('text', '')}"
+        terms = re.findall(r"[\u4e00-\u9fa5]{2,}|[A-Za-z0-9_]{2,}", issue)
+        return any(term in clause_text for term in terms)
+
+    def _clause_matches_rule_keywords(self, rule: dict[str, Any], clause: dict[str, Any]) -> bool:
+        clause_text = f"{clause.get('title', '')} {clause.get('type', '')} {clause.get('text', '')}"
+        return any(term in clause_text for term in self._rule_keywords(rule))
+
+    def _text_overlaps(self, left: str, right: str) -> bool:
+        left = re.sub(r"\s+", "", left or "")
+        right = re.sub(r"\s+", "", right or "")
+        if not left or not right:
+            return False
+        if len(right) <= 80:
+            return right in left
+        if right[:120] in left:
+            return True
+        return left[:120] in right
 
     def _match_relevant_clauses(self, rule: dict[str, Any], clauses: list[dict[str, Any]]) -> list[dict[str, Any]]:
         if not clauses:
