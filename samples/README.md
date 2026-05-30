@@ -9,8 +9,15 @@
   - `SL-GEN-012` 付款不得早于合同生效/审批
   - `SL-GEN-014` 签章与生效条款校验
 - `sales_contract_good_compliant.txt`：合规样本，业务语义上应满足当前销售合同相关规则。
+- `sales_auto_pass_low_value_compliant.txt`：低额全合规自动通过样本，目标是销售合同策略下规则全通过，并满足标准流转策略的自动通过金额阈值。
 
 ## 新增场景样本
+
+- `sales_auto_pass_low_value_compliant.txt`
+  - 目标策略：`strategy-sales` 销售合同审核策略
+  - 目标流转：`flow-standard-contracts` 标准合同流转策略
+  - 预期状态：`AutoPass / Completed`
+  - 重点条件：合同金额 88,000 元，低于标准流转策略 100,000 元人工确认阈值；主体、付款、发票、签章生效和违约责任均完整。
 
 - `sales_need_revision_early_payment.txt`
   - 目标策略：`strategy-sales` 销售合同审核策略
