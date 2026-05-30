@@ -48,6 +48,7 @@ const $ = (selector) => document.querySelector(selector);
 
 const els = {
   uploadBtn: $("#uploadBtn"),
+  uploadStatus: $("#uploadStatus"),
   knowledgeBtn: $("#knowledgeBtn"),
   feedbackBtn: $("#feedbackBtn"),
   agentsBtn: $("#agentsBtn"),
@@ -235,12 +236,24 @@ async function api(path, options = {}) {
 }
 
 function normalizeErrorMessage(error) {
+  return parseApiError(error).message;
+}
+
+function parseApiError(error) {
   const raw = error?.message || String(error || "未知错误");
   try {
     const parsed = JSON.parse(raw);
-    return parsed.detail || parsed.message || raw;
+    const detail = parsed.detail || parsed.message || parsed;
+    if (typeof detail === "string") return { message: detail };
+    if (detail && typeof detail === "object") {
+      return {
+        ...detail,
+        message: detail.message || detail.detail || raw,
+      };
+    }
+    return { message: raw };
   } catch {
-    return raw;
+    return { message: raw };
   }
 }
 
@@ -2394,11 +2407,34 @@ async function uploadFile(file) {
   form.append("source", "upload");
   form.append("business_dept", els.businessDept.value || "");
   form.append("initiator", els.initiator.value || "");
-  const data = await api("/api/contracts", { method: "POST", body: form });
-  toast("合同已入库，Agent 审核链路已启动。");
-  state.contractListTab = "todo";
-  await loadContracts();
-  await selectContract(data.item.id);
+  setUploadStatus("uploading", `正在上传：${file.name}`);
+  els.uploadBtn.disabled = true;
+  try {
+    const data = await api("/api/contracts", { method: "POST", body: form });
+    setUploadStatus("success", "上传成功，已进入审核链路。");
+    toast("合同已入库，Agent 审核链路已启动。");
+    state.contractListTab = "todo";
+    await loadContracts();
+    await selectContract(data.item.id);
+  } catch (error) {
+    const apiError = parseApiError(error);
+    setUploadStatus("error", apiError.message);
+    toast(apiError.message);
+    if (apiError.code === "duplicate_contract" && apiError.existing_id) {
+      state.contractListTab = "todo";
+      await loadContracts();
+      await selectContract(apiError.existing_id);
+    }
+  } finally {
+    els.uploadBtn.disabled = false;
+    els.fileInput.value = "";
+  }
+}
+
+function setUploadStatus(type, message) {
+  if (!els.uploadStatus) return;
+  els.uploadStatus.textContent = message || "";
+  els.uploadStatus.className = `upload-status ${type ? `upload-status-${type}` : ""}`;
 }
 
 function startPolling() {
@@ -2472,7 +2508,11 @@ function toast(message) {
   setTimeout(() => node.remove(), 2600);
 }
 
-els.uploadBtn.addEventListener("click", () => els.fileInput.click());
+els.uploadBtn.addEventListener("click", () => {
+  els.fileInput.value = "";
+  setUploadStatus("", "");
+  els.fileInput.click();
+});
 els.fileInput.addEventListener("change", () => uploadFile(els.fileInput.files[0]).catch((error) => toast(error.message)));
 els.refreshBtn.addEventListener("click", () => loadContracts().catch((error) => toast(error.message)));
 els.knowledgeBtn.addEventListener("click", () => openKnowledgeModal().catch((error) => toast(error.message)));

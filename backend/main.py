@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import shutil
 from pathlib import Path
@@ -512,6 +513,18 @@ def create_contract(
     business_dept: str = Form(""),
     initiator: str = Form(""),
 ) -> dict:
+    file_hash, file_size = _hash_upload_file(file.file)
+    existing = _find_contract_by_file_hash(file_hash)
+    if existing:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "duplicate_contract",
+                "message": f"该合同已存在：{existing.get('name') or existing.get('file_name') or existing['id']}，无需重复上传。",
+                "existing_id": existing["id"],
+                "existing_name": existing.get("name", ""),
+            },
+        )
     intake_result = intake_skill.run_upload(
         file.file,
         file.filename or "contract",
@@ -521,6 +534,9 @@ def create_contract(
         store,
     )
     contract = intake_result["data"]["contract"]
+    contract["file_sha256"] = file_hash
+    contract["file_size"] = file_size
+    store.upsert_contract(contract)
     background_tasks.add_task(agent.run, contract["id"])
     return {"item": _summarize(contract)}
 
@@ -769,6 +785,45 @@ def _summarize(contract: dict) -> dict:
         "p0_count": sum(1 for risk in risks if risk.get("priority") == "P0"),
         "p1_count": sum(1 for risk in risks if risk.get("priority") == "P1"),
     }
+
+
+def _hash_upload_file(file_obj) -> tuple[str, int]:
+    hasher = hashlib.sha256()
+    size = 0
+    file_obj.seek(0)
+    while chunk := file_obj.read(1024 * 1024):
+        hasher.update(chunk)
+        size += len(chunk)
+    file_obj.seek(0)
+    return hasher.hexdigest(), size
+
+
+def _hash_path(path: Path) -> str:
+    hasher = hashlib.sha256()
+    with path.open("rb") as file_obj:
+        while chunk := file_obj.read(1024 * 1024):
+            hasher.update(chunk)
+    return hasher.hexdigest()
+
+
+def _find_contract_by_file_hash(file_hash: str) -> dict | None:
+    if not file_hash:
+        return None
+    for contract in store.list_contracts():
+        if contract.get("file_sha256") == file_hash:
+            return contract
+        file_path = contract.get("file_path")
+        if not file_path:
+            continue
+        path = Path(file_path)
+        if not path.exists() or not path.is_file():
+            continue
+        try:
+            if _hash_path(path) == file_hash:
+                return contract
+        except OSError:
+            continue
+    return None
 
 
 def _model_to_dict(model: BaseModel) -> dict:
