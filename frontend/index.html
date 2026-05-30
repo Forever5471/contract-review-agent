@@ -9,7 +9,7 @@
       window.location.replace("http://127.0.0.1:8123/");
     }
   </script>
-  <link rel="stylesheet" href="/styles.css?v=20260530-7" />
+  <link rel="stylesheet" href="/styles.css?v=20260530-8" />
 </head>
 <body>
   <div class="app-shell">
@@ -125,21 +125,31 @@
               <span>审核依据</span>
               <small>条款对象、结构化字段、模板匹配和策略依据</small>
             </summary>
-            <div class="evidence-grid">
-              <section class="evidence-card">
-                <h3>条款对象</h3>
+            <div class="evidence-tabs" role="tablist" aria-label="审核依据类型">
+              <button class="evidence-tab-btn active" type="button" data-evidence-tab="clauses" role="tab" aria-selected="true" aria-controls="clausesEvidencePanel">
+                条款对象 <em id="clausesEvidenceCount">0</em>
+              </button>
+              <button class="evidence-tab-btn" type="button" data-evidence-tab="fields" role="tab" aria-selected="false" aria-controls="fieldsEvidencePanel">
+                结构化字段 <em id="fieldsEvidenceCount">0</em>
+              </button>
+              <button class="evidence-tab-btn" type="button" data-evidence-tab="template" role="tab" aria-selected="false" aria-controls="templateEvidencePanel">
+                模板匹配 <em id="templateEvidenceCount">0</em>
+              </button>
+              <button class="evidence-tab-btn" type="button" data-evidence-tab="strategy" role="tab" aria-selected="false" aria-controls="strategyEvidencePanel">
+                命中策略 <em id="strategyEvidenceCount">0</em>
+              </button>
+            </div>
+            <div class="evidence-tab-panels">
+              <section id="clausesEvidencePanel" class="evidence-tab-panel active" data-evidence-panel="clauses" role="tabpanel">
                 <div id="clausesTab"></div>
               </section>
-              <section class="evidence-card">
-                <h3>结构化字段</h3>
+              <section id="fieldsEvidencePanel" class="evidence-tab-panel" data-evidence-panel="fields" role="tabpanel" hidden>
                 <div id="fieldsTab"></div>
               </section>
-              <section class="evidence-card">
-                <h3>模板匹配</h3>
+              <section id="templateEvidencePanel" class="evidence-tab-panel" data-evidence-panel="template" role="tabpanel" hidden>
                 <div id="templateTab"></div>
               </section>
-              <section class="evidence-card">
-                <h3>命中策略</h3>
+              <section id="strategyEvidencePanel" class="evidence-tab-panel" data-evidence-panel="strategy" role="tabpanel" hidden>
                 <div id="strategyTab"></div>
               </section>
             </div>
@@ -706,6 +716,6 @@
     </div>
   </section>
 
-  <script src="/app.js?v=20260530-7"></script>
+  <script src="/app.js?v=20260530-8"></script>
 </body>
 </html>

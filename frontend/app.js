@@ -35,6 +35,7 @@ const state = {
   editingStrategyOriginalId: null,
   editingFlowStrategyOriginalId: null,
   currentRuleMode: "脚本模式",
+  activeEvidenceTab: "clauses",
   inputParams: [],
   outputParams: [],
   debugFile: null,
@@ -73,6 +74,12 @@ const els = {
   maxAmount: $("#maxAmount"),
   strategyName: $("#strategyName"),
   textTab: $("#textTab"),
+  evidenceTabBtns: document.querySelectorAll("[data-evidence-tab]"),
+  evidencePanels: document.querySelectorAll("[data-evidence-panel]"),
+  clausesEvidenceCount: $("#clausesEvidenceCount"),
+  fieldsEvidenceCount: $("#fieldsEvidenceCount"),
+  templateEvidenceCount: $("#templateEvidenceCount"),
+  strategyEvidenceCount: $("#strategyEvidenceCount"),
   clausesTab: $("#clausesTab"),
   fieldsTab: $("#fieldsTab"),
   templateTab: $("#templateTab"),
@@ -1931,9 +1938,36 @@ function renderContract(contract) {
   els.fieldsTab.innerHTML = renderObjectTable(contract.fields || {});
   els.templateTab.innerHTML = renderObjectTable(contract.template_match || {});
   els.strategyTab.innerHTML = renderObjectTable(formatStrategyEvidence(contract.review_strategy || {}));
+  renderEvidenceTabCounts(contract);
+  setEvidenceTab(state.activeEvidenceTab || "clauses");
   els.agentPromptVersion.textContent = contract.agent_prompt_version || "-";
   renderTimeline(contract.review?.events || []);
   renderResult(contract);
+}
+
+function renderEvidenceTabCounts(contract) {
+  const strategy = contract.review_strategy || {};
+  const strategyEvidence = formatStrategyEvidence(strategy);
+  els.clausesEvidenceCount.textContent = String((contract.clauses || []).length);
+  els.fieldsEvidenceCount.textContent = String(Object.keys(contract.fields || {}).length);
+  els.templateEvidenceCount.textContent = String(Object.keys(contract.template_match || {}).length);
+  els.strategyEvidenceCount.textContent = String(
+    Object.values(strategyEvidence).filter((value) => Array.isArray(value) ? value.length : value).length
+  );
+}
+
+function setEvidenceTab(tab) {
+  state.activeEvidenceTab = tab || "clauses";
+  els.evidenceTabBtns.forEach((button) => {
+    const active = button.dataset.evidenceTab === state.activeEvidenceTab;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-selected", active ? "true" : "false");
+  });
+  els.evidencePanels.forEach((panel) => {
+    const active = panel.dataset.evidencePanel === state.activeEvidenceTab;
+    panel.classList.toggle("active", active);
+    panel.hidden = !active;
+  });
 }
 
 function renderClauses(clauses) {
@@ -2689,6 +2723,9 @@ els.uploadBtn.addEventListener("click", () => {
 });
 els.fileInput.addEventListener("change", () => uploadFile(els.fileInput.files[0]).catch((error) => toast(error.message)));
 els.refreshBtn.addEventListener("click", () => loadContracts().catch((error) => toast(error.message)));
+els.evidenceTabBtns.forEach((button) => {
+  button.addEventListener("click", () => setEvidenceTab(button.dataset.evidenceTab));
+});
 els.knowledgeBtn.addEventListener("click", () => openKnowledgeModal().catch((error) => toast(error.message)));
 els.closeKnowledgeBtn.addEventListener("click", () => els.knowledgeModal.classList.add("hidden"));
 els.refreshKnowledgeBtn.addEventListener("click", () => loadKnowledge(true).then(() => toast("知识库索引已刷新。")).catch((error) => toast(error.message)));
