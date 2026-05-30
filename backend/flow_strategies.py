@@ -150,6 +150,9 @@ def decide_contract_flow(
         return _decision("NeedHumanConfirm", flow_strategy, f"一般风险数量达到 {general_count} 项。", counts, amount)
     if amount >= float(flow_strategy.get("human_confirm_min_amount", 100000) or 0) and float(flow_strategy.get("human_confirm_min_amount", 100000) or 0) > 0:
         return _decision("NeedHumanConfirm", flow_strategy, f"合同金额 {amount:,.2f} 达到人工确认阈值。", counts, amount)
+    incomplete_count = int(report.get("incomplete_rule_count") or len(report.get("incomplete_rules") or []))
+    if incomplete_count > 0:
+        return _decision("NeedHumanConfirm", flow_strategy, f"有 {incomplete_count} 条规则未完成判断，需人工确认或重试后再流转。", counts, amount)
 
     can_auto_pass = (
         counts["P0"] <= int(flow_strategy.get("auto_pass_max_p0", 0))

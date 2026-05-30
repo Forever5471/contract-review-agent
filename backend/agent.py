@@ -104,14 +104,17 @@ class ContractReviewAgent:
             review_data = review_result["data"]
             risks = review_data["risks"]
             rule_events = review_data.get("rule_events") or []
+            incomplete_rules = review_data.get("incomplete_rules") or [
+                event for event in rule_events if not event.get("evaluated", True)
+            ]
             executed_rules = int(review_data.get("executed_rules") or len(rule_events) or len(risks))
-            passed_rules = sum(1 for event in rule_events if event.get("passed"))
+            passed_rules = sum(1 for event in rule_events if event.get("evaluated", True) and event.get("passed"))
 
             self._event(
                 contract_id,
                 "Verify",
                 "agent_decision",
-                f"规则审查完成，命中 {len(risks)} 条风险。",
+                f"规则审查完成，命中 {len(risks)} 条风险，{len(incomplete_rules)} 条规则未完成判断。",
                 visible=True,
             )
             reporting_skill = ReviewReportingSkill(llm_client=runtime["llm_client"], agent_config=runtime["config"])
@@ -135,6 +138,8 @@ class ContractReviewAgent:
                 "executed_rules": executed_rules,
                 "passed_rules": passed_rules,
                 "rule_events": rule_events,
+                "incomplete_rules": incomplete_rules,
+                "incomplete_rule_count": len(incomplete_rules),
                 "reviewed_rule_ids": [event.get("rule_id") for event in rule_events if event.get("rule_id")],
             }
             flow_decision = decide_contract_flow(

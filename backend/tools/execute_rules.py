@@ -39,9 +39,12 @@ class RuleEngineTool:
             result = self._evaluate_rule(rule, text, contract_type, fields, clauses or [])
             rule_events.append(result)
             warnings.extend(result.get("warnings", []))
+            if not result.get("evaluated", True):
+                continue
             if not result["passed"]:
                 risks.append(result)
         confidence_detail = self._calculate_confidence(rule_events, risks, fields, warnings)
+        incomplete_rules = [event for event in rule_events if not event.get("evaluated", True)]
         return {
             "tool_name": self.name,
             "tool_version": self.version,
@@ -51,6 +54,8 @@ class RuleEngineTool:
                 "executed_rules": len(rules),
                 "risks": risks,
                 "rule_events": rule_events,
+                "incomplete_rules": incomplete_rules,
+                "incomplete_rule_count": len(incomplete_rules),
                 "llm_enabled": self.llm is not None,
                 "llm_provider": getattr(getattr(self.llm, "config", None), "provider", None) if self.llm is not None else None,
                 "llm_model": getattr(self.llm, "model", None),
@@ -89,7 +94,8 @@ class RuleEngineTool:
         clauses: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         result = self._evaluate_rule(rule, text, contract_type, fields, clauses or [])
-        confidence_detail = self._calculate_confidence([result], [] if result["passed"] else [result], fields, result.get("warnings", []))
+        risks = [] if result["passed"] or not result.get("evaluated", True) else [result]
+        confidence_detail = self._calculate_confidence([result], risks, fields, result.get("warnings", []))
         return {
             "tool_name": self.name,
             "tool_version": self.version,
@@ -97,7 +103,9 @@ class RuleEngineTool:
             "confidence": confidence_detail["overall"],
             "data": {
                 "rule_event": result,
-                "risks": [] if result["passed"] else [result],
+                "risks": risks,
+                "incomplete_rules": [] if result.get("evaluated", True) else [result],
+                "incomplete_rule_count": 0 if result.get("evaluated", True) else 1,
                 "llm_enabled": self.llm is not None,
                 "llm_provider": getattr(getattr(self.llm, "config", None), "provider", None) if self.llm is not None else None,
                 "llm_model": getattr(self.llm, "model", None),
@@ -123,6 +131,8 @@ class RuleEngineTool:
         warnings: list[str] = []
         llm_used = False
         llm_meta: dict[str, Any] = {}
+        evaluated = True
+        execution_status = "completed"
         relevant_clauses = self._match_relevant_clauses(rule, clauses)
         input_result = self._extract_rule_inputs(rule, text, contract_type, fields, relevant_clauses)
         rule_inputs = input_result["values"]
@@ -182,9 +192,11 @@ class RuleEngineTool:
                     },
                 ]
             elif llm_result.get("error"):
+                evaluated = False
+                execution_status = "incomplete"
                 passed = False
                 issue = f"指令模式暂未完成判断：{llm_result['error']}"
-                suggestion = "请确认 LLM 已配置，或切换到脚本模式后使用 Python 脚本判断。"
+                suggestion = "这是系统执行未完成，不代表合同条款本身存在风险。请稍后重试、检查大模型额度/限流，或由人工复核该规则。"
                 warnings.append(f"{rule_id} 指令模式 LLM 调用未生效：{llm_result['error']}")
 
         if not passed:
@@ -199,9 +211,11 @@ class RuleEngineTool:
             "priority": rule["priority"],
             "risk_level": rule["risk_level"],
             "passed": passed,
+            "evaluated": evaluated,
+            "execution_status": execution_status,
             "issue": "" if passed else issue,
             "suggestion": "" if passed else suggestion,
-            "need_human_confirm": (not passed and rule["priority"] in {"P0", "P1"}),
+            "need_human_confirm": (evaluated and not passed and rule["priority"] in {"P0", "P1"}),
             "evidence": evidence,
             "warnings": warnings,
             "llm_used": llm_used,

@@ -2004,8 +2004,16 @@ function renderResult(contract) {
     const general = (counts.P2 || 0) + (counts.P3 || 0);
     const passedRuleEvents = getPassedRuleEvents(contract);
     const executedRuleCount = getExecutedRuleCount(contract, risks);
-    const passed = Math.max(0, Number(contract.report.passed_rules ?? passedRuleEvents.length) || (executedRuleCount - risks.length));
-    const filterCounts = { all: risks.length, high, general, passed };
+    const incompleteRuleEvents = getIncompleteRuleEvents(contract);
+    const hasIncompleteRules = incompleteRuleEvents.length > 0;
+    const passed = Math.max(0, Number(contract.report.passed_rules ?? passedRuleEvents.length) || (executedRuleCount - risks.length - incompleteRuleEvents.length));
+    const filterCounts = {
+      all: risks.length,
+      high,
+      general,
+      ...(incompleteRuleEvents.length ? { incomplete: incompleteRuleEvents.length } : {}),
+      passed,
+    };
     if (!Object.prototype.hasOwnProperty.call(filterCounts, state.resultFilter)) {
       state.resultFilter = "all";
     }
@@ -2015,15 +2023,18 @@ function renderResult(contract) {
       { key: "all", label: "全部", count: risks.length },
       { key: "high", label: "重大风险", count: high },
       { key: "general", label: "一般风险", count: general },
+      ...(incompleteRuleEvents.length ? [{ key: "incomplete", label: "未完成", count: incompleteRuleEvents.length }] : []),
       { key: "passed", label: "通过", count: passed },
     ];
+    const boardRejected = risks.length > 0 || hasIncompleteRules;
+    const statusLabel = risks.length ? "不通过" : hasIncompleteRules ? "待确认" : "通过";
     els.resultSummary.innerHTML = `
-      <div class="review-board ${risks.length ? "review-board-rejected" : "review-board-passed"}">
+      <div class="review-board ${boardRejected ? "review-board-rejected" : "review-board-passed"}">
         <div class="review-board-head">
           <div class="review-title-block">
             <div class="review-title-line">
               <h3>审查结果</h3>
-              <span class="review-status-badge ${risks.length ? "status-fail" : "status-pass"}">${risks.length ? "不通过" : "通过"}</span>
+              <span class="review-status-badge ${boardRejected ? "status-fail" : "status-pass"}">${statusLabel}</span>
             </div>
             <b>审核结论：</b>
           </div>
@@ -2052,7 +2063,7 @@ function renderResult(contract) {
 function filterRisksByResultTab(risks, filter) {
   if (filter === "high") return risks.filter((risk) => ["P0", "P1"].includes(risk.priority));
   if (filter === "general") return risks.filter((risk) => ["P2", "P3"].includes(risk.priority));
-  if (filter === "passed") return [];
+  if (["passed", "incomplete"].includes(filter)) return [];
   return risks;
 }
 
@@ -2070,6 +2081,9 @@ function renderRiskCardsForFilter(filteredRisks, filter, allRisks, contract) {
   if (filter === "passed") {
     return renderPassedRuleCards(contract, allRisks);
   }
+  if (filter === "incomplete") {
+    return renderIncompleteRuleCards(contract);
+  }
   if (!filteredRisks.length) {
     const labelMap = {
       high: "暂无重大风险",
@@ -2082,7 +2096,13 @@ function renderRiskCardsForFilter(filteredRisks, filter, allRisks, contract) {
 }
 
 function getPassedRuleEvents(contract) {
-  return ((contract.report || {}).rule_events || []).filter((event) => event.passed);
+  return ((contract.report || {}).rule_events || []).filter((event) => event.evaluated !== false && event.passed);
+}
+
+function getIncompleteRuleEvents(contract) {
+  const report = contract.report || {};
+  const events = report.incomplete_rules?.length ? report.incomplete_rules : (report.rule_events || []);
+  return events.filter((event) => event.evaluated === false || event.execution_status === "incomplete");
 }
 
 function getExecutedRuleCount(contract, risks) {
@@ -2101,7 +2121,8 @@ function getExecutedRuleCount(contract, risks) {
 function renderPassedRuleCards(contract, allRisks) {
   const passedEvents = getPassedRuleEvents(contract);
   const executedRuleCount = getExecutedRuleCount(contract, allRisks);
-  const passedCount = Math.max(0, Number(contract.report?.passed_rules ?? passedEvents.length) || (executedRuleCount - allRisks.length));
+  const incompleteCount = getIncompleteRuleEvents(contract).length;
+  const passedCount = Math.max(0, Number(contract.report?.passed_rules ?? passedEvents.length) || (executedRuleCount - allRisks.length - incompleteCount));
   if (!passedCount) return renderRiskFilterEmpty("暂无通过规则");
   if (!passedEvents.length) {
     return `
@@ -2115,6 +2136,18 @@ function renderPassedRuleCards(contract, allRisks) {
     <article class="review-pass-card passed-rule-card">
       <b>规则(${escapeHtml(event.rule_id || "-")})：${escapeHtml(event.rule_name || "未命名规则")}</b>
       <p>${escapeHtml(event.mode || "规则")} · ${escapeHtml(event.risk_level || "-")} · ${escapeHtml(event.priority || "-")}</p>
+    </article>
+  `).join("");
+}
+
+function renderIncompleteRuleCards(contract) {
+  const events = getIncompleteRuleEvents(contract);
+  if (!events.length) return renderRiskFilterEmpty("暂无未完成规则");
+  return events.map((event) => `
+    <article class="review-pass-card incomplete-rule-card">
+      <b>规则(${escapeHtml(event.rule_id || "-")})：${escapeHtml(event.rule_name || "未命名规则")}</b>
+      <p>${escapeHtml(event.issue || "该规则因系统或大模型调用问题未完成判断。")}</p>
+      <small>${escapeHtml(event.suggestion || "请稍后重试，或由人工复核该规则。")}</small>
     </article>
   `).join("");
 }
@@ -2219,8 +2252,9 @@ function renderPartyLabel(parties) {
 function getReviewMeta(contract, risks) {
   const strategyName = contract.review_strategy?.name || contract.review_strategy || "未匹配审核策略";
   const executedRuleCount = getExecutedRuleCount(contract, risks);
-  const passedRuleCount = Math.max(0, Number(contract.report?.passed_rules || 0) || (executedRuleCount - risks.length));
-  return `${strategyName} · 已审 ${executedRuleCount} 条规则，通过 ${passedRuleCount} 条，风险 ${risks.length} 条`;
+  const incompleteCount = getIncompleteRuleEvents(contract).length;
+  const passedRuleCount = Math.max(0, Number(contract.report?.passed_rules || 0) || (executedRuleCount - risks.length - incompleteCount));
+  return `${strategyName} · 已审 ${executedRuleCount} 条规则，通过 ${passedRuleCount} 条，风险 ${risks.length} 条${incompleteCount ? `，未完成 ${incompleteCount} 条` : ""}`;
 }
 
 function priorityLabel(priority) {

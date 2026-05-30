@@ -1247,6 +1247,20 @@ textarea {
   line-height: 1.6;
 }
 
+.incomplete-rule-card {
+  border-color: #fed7aa;
+  background: #fff7ed;
+  color: #9a3412;
+}
+
+.incomplete-rule-card small {
+  display: block;
+  margin-top: 6px;
+  color: #b45309;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 .risk-list .human-review-panel {
   border: 1px solid var(--line);
   border-radius: 6px;
