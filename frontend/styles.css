@@ -2416,6 +2416,36 @@ textarea {
   justify-content: flex-start;
 }
 
+.model-test-panel {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfdff;
+}
+
+.model-test-status {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
+.model-test-status-testing {
+  color: var(--blue);
+}
+
+.model-test-status-success {
+  color: var(--green);
+}
+
+.model-test-status-error {
+  color: var(--red);
+}
+
 .strategy-rule-section {
   margin-top: 14px;
   border: 1px solid var(--line);

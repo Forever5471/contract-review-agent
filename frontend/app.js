@@ -221,6 +221,8 @@ const els = {
   agentModelApiKey: $("#agentModelApiKey"),
   agentModelApiKeyStatus: $("#agentModelApiKeyStatus"),
   agentModelEnabled: $("#agentModelEnabled"),
+  agentModelTestBtn: $("#agentModelTestBtn"),
+  agentModelTestStatus: $("#agentModelTestStatus"),
   agentSaveStatus: $("#agentSaveStatus"),
   agentSaveBtn: $("#agentSaveBtn"),
   deleteAgentBtn: $("#deleteAgentBtn"),
@@ -758,6 +760,7 @@ function selectAgent(agentId) {
   els.agentModelEnabled.checked = !!agent.model?.enabled;
   els.deleteAgentBtn.disabled = false;
   setAgentSaveStatus("", "");
+  setAgentModelTestStatus("", "");
 }
 
 function startNewAgent() {
@@ -787,6 +790,7 @@ function startNewAgent() {
   els.agentModelEnabled.checked = false;
   els.deleteAgentBtn.disabled = true;
   setAgentSaveStatus("", "");
+  setAgentModelTestStatus("", "");
 }
 
 function renderAgentApiKeyStatus(agent) {
@@ -1104,6 +1108,38 @@ function setAgentSaveStatus(type, message) {
   if (!els.agentSaveStatus) return;
   els.agentSaveStatus.textContent = message || "";
   els.agentSaveStatus.className = `save-status ${type ? `save-status-${type}` : ""}`;
+}
+
+async function testAgentModelConnection() {
+  setAgentModelTestStatus("testing", "正在测试连接...");
+  els.agentModelTestBtn.disabled = true;
+  try {
+    const data = await api("/api/agents/test-llm", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(collectAgentForm()),
+    });
+    if (data.ok) {
+      const usageText = data.usage?.total_tokens ? `，消耗 ${data.usage.total_tokens} tokens` : "";
+      setAgentModelTestStatus("success", `连接成功：${data.provider || "-"} / ${data.model || "-"}${usageText}`);
+      toast("大模型连接测试成功。");
+    } else {
+      setAgentModelTestStatus("error", `连接失败：${data.error || "大模型调用失败"}`);
+      toast(`大模型连接失败：${data.error || "调用失败"}`);
+    }
+  } catch (error) {
+    const message = normalizeErrorMessage(error);
+    setAgentModelTestStatus("error", `连接失败：${message}`);
+    toast(`大模型连接失败：${message}`);
+  } finally {
+    els.agentModelTestBtn.disabled = false;
+  }
+}
+
+function setAgentModelTestStatus(type, message) {
+  if (!els.agentModelTestStatus) return;
+  els.agentModelTestStatus.textContent = message || "";
+  els.agentModelTestStatus.className = `model-test-status ${type ? `model-test-status-${type}` : ""}`;
 }
 
 async function deleteCurrentAgent() {
@@ -2673,6 +2709,7 @@ els.closeAgentsBtn.addEventListener("click", () => els.agentsModal.classList.add
 els.newAgentBtn.addEventListener("click", startNewAgent);
 els.resetAgentsBtn.addEventListener("click", () => resetAgents().catch((error) => toast(error.message)));
 els.agentForm.addEventListener("submit", (event) => saveCurrentAgent(event).catch((error) => toast(error.message)));
+els.agentModelTestBtn.addEventListener("click", () => testAgentModelConnection());
 els.deleteAgentBtn.addEventListener("click", () => deleteCurrentAgent().catch((error) => toast(error.message)));
 els.agentSkillSearch.addEventListener("input", () => {
   state.agentSkillSearch = els.agentSkillSearch.value;

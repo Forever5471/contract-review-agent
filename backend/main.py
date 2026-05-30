@@ -461,6 +461,50 @@ def agents_list() -> dict:
     }
 
 
+@app.post("/api/agents/test-llm")
+def agent_test_llm(payload: AgentConfigRequest) -> dict:
+    agent_payload = _model_to_dict(payload)
+    model = dict(agent_payload.get("model") or {})
+    existing_agent = get_agent(agent_payload.get("id", ""))
+    if not model.get("api_key") and existing_agent and existing_agent.get("model", {}).get("api_key"):
+        model["api_key"] = existing_agent["model"]["api_key"]
+    model["enabled"] = True
+    model["max_tokens"] = min(int(model.get("max_tokens") or 128), 128)
+    model["timeout_seconds"] = min(int(model.get("timeout_seconds") or 20), 30)
+    client = build_llm_client(model)
+    if client is None:
+        raise HTTPException(status_code=400, detail="大模型配置不完整，请检查供应商、模型、Base URL 和 API Key。")
+
+    result = client.complete_json(
+        [
+            {
+                "role": "system",
+                "content": "你是连接测试助手。只返回 JSON，不要输出其他文本。",
+            },
+            {
+                "role": "user",
+                "content": '请返回 {"ok": true, "message": "pong"} 用于测试连接。',
+            },
+        ],
+        request_id="agent-model-connectivity-test",
+    )
+    if not result.get("ok"):
+        return {
+            "ok": False,
+            "provider": result.get("provider") or model.get("provider"),
+            "model": result.get("model") or model.get("model"),
+            "error": result.get("error") or "大模型测试调用失败。",
+        }
+    return {
+        "ok": True,
+        "provider": result.get("provider"),
+        "model": result.get("model"),
+        "request_id": result.get("request_id"),
+        "usage": result.get("usage", {}),
+        "message": "大模型连接测试成功。",
+    }
+
+
 @app.post("/api/agents")
 def agent_create(payload: AgentConfigRequest) -> dict:
     try:

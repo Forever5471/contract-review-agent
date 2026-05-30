@@ -9,7 +9,7 @@
       window.location.replace("http://127.0.0.1:8123/");
     }
   </script>
-  <link rel="stylesheet" href="/styles.css?v=20260530-5" />
+  <link rel="stylesheet" href="/styles.css?v=20260530-6" />
 </head>
 <body>
   <div class="app-shell">
@@ -690,6 +690,10 @@
               <input id="agentModelEnabled" type="checkbox" />
               <span>启用大模型</span>
             </label>
+            <section class="model-test-panel span-2">
+              <button id="agentModelTestBtn" class="ghost-btn" type="button">测试大模型连接</button>
+              <span id="agentModelTestStatus" class="model-test-status" role="status" aria-live="polite"></span>
+            </section>
           </div>
 
           <div class="rule-editor-actions">
@@ -702,6 +706,6 @@
     </div>
   </section>
 
-  <script src="/app.js?v=20260530-5"></script>
+  <script src="/app.js?v=20260530-6"></script>
 </body>
 </html>
