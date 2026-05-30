@@ -220,6 +220,8 @@ const els = {
   agentModelApiKey: $("#agentModelApiKey"),
   agentModelApiKeyStatus: $("#agentModelApiKeyStatus"),
   agentModelEnabled: $("#agentModelEnabled"),
+  agentSaveStatus: $("#agentSaveStatus"),
+  agentSaveBtn: $("#agentSaveBtn"),
   deleteAgentBtn: $("#deleteAgentBtn"),
 };
 
@@ -230,6 +232,16 @@ async function api(path, options = {}) {
     throw new Error(message || `HTTP ${response.status}`);
   }
   return response.json();
+}
+
+function normalizeErrorMessage(error) {
+  const raw = error?.message || String(error || "未知错误");
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed.detail || parsed.message || raw;
+  } catch {
+    return raw;
+  }
 }
 
 async function loadContracts() {
@@ -732,6 +744,7 @@ function selectAgent(agentId) {
   renderAgentApiKeyStatus(agent);
   els.agentModelEnabled.checked = !!agent.model?.enabled;
   els.deleteAgentBtn.disabled = false;
+  setAgentSaveStatus("", "");
 }
 
 function startNewAgent() {
@@ -760,6 +773,7 @@ function startNewAgent() {
   renderAgentApiKeyStatus(null);
   els.agentModelEnabled.checked = false;
   els.deleteAgentBtn.disabled = true;
+  setAgentSaveStatus("", "");
 }
 
 function renderAgentApiKeyStatus(agent) {
@@ -1052,14 +1066,31 @@ async function saveCurrentAgent(event) {
     ? `/api/agents/${encodeURIComponent(state.editingAgentOriginalId)}`
     : "/api/agents";
   const method = state.editingAgentOriginalId ? "PUT" : "POST";
-  const data = await api(path, {
-    method,
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(collectAgentForm()),
-  });
-  toast("智能体配置已保存，后续审核将使用该配置。");
-  state.selectedAgentId = data.item.id;
-  await loadAgents();
+  setAgentSaveStatus("saving", "正在保存...");
+  els.agentSaveBtn.disabled = true;
+  try {
+    const data = await api(path, {
+      method,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(collectAgentForm()),
+    });
+    state.selectedAgentId = data.item.id;
+    await loadAgents();
+    setAgentSaveStatus("success", `保存成功：${data.item.name || data.item.id}`);
+    toast("智能体配置已保存，后续审核将使用该配置。");
+  } catch (error) {
+    const message = normalizeErrorMessage(error);
+    setAgentSaveStatus("error", `保存失败：${message}`);
+    toast(`保存智能体失败：${message}`);
+  } finally {
+    els.agentSaveBtn.disabled = false;
+  }
+}
+
+function setAgentSaveStatus(type, message) {
+  if (!els.agentSaveStatus) return;
+  els.agentSaveStatus.textContent = message || "";
+  els.agentSaveStatus.className = `save-status ${type ? `save-status-${type}` : ""}`;
 }
 
 async function deleteCurrentAgent() {

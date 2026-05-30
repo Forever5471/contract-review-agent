@@ -2678,9 +2678,41 @@ textarea {
 
 .rule-editor-actions {
   display: flex;
+  align-items: center;
   justify-content: flex-end;
   gap: 8px;
   padding-top: 12px;
+}
+
+.save-status {
+  min-height: 30px;
+  margin-right: auto;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 10px;
+  border-radius: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.save-status:empty {
+  padding: 0;
+}
+
+.save-status-saving {
+  color: var(--blue);
+  background: #eff6ff;
+}
+
+.save-status-success {
+  color: var(--green);
+  background: #e8f8ef;
+}
+
+.save-status-error {
+  color: var(--red);
+  background: #feecec;
 }
 
 .rule-editor-actions .danger-btn:disabled {

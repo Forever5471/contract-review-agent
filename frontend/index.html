@@ -9,7 +9,7 @@
       window.location.replace("http://127.0.0.1:8123/");
     }
   </script>
-  <link rel="stylesheet" href="/styles.css?v=20260523-18" />
+  <link rel="stylesheet" href="/styles.css?v=20260530-2" />
 </head>
 <body>
   <div class="app-shell">
@@ -692,14 +692,15 @@
           </div>
 
           <div class="rule-editor-actions">
+            <span id="agentSaveStatus" class="save-status" role="status" aria-live="polite"></span>
             <button id="deleteAgentBtn" class="danger-btn" type="button">删除</button>
-            <button class="primary-btn" type="submit">保存智能体</button>
+            <button id="agentSaveBtn" class="primary-btn" type="submit">保存智能体</button>
           </div>
         </form>
       </main>
     </div>
   </section>
 
-  <script src="/app.js?v=20260523-17"></script>
+  <script src="/app.js?v=20260530-2"></script>
 </body>
 </html>
