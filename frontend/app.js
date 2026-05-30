@@ -1778,7 +1778,10 @@ function renderContractList() {
   }
   els.contractList.innerHTML = visibleContracts.map((item) => `
     <article class="contract-item ${item.id === state.selectedId ? "active" : ""}" data-id="${item.id}">
-      <b>${escapeHtml(item.name)}</b>
+      <div class="contract-item-head">
+        <b>${escapeHtml(item.name)}</b>
+        ${state.contractListTab === "done" ? `<button class="archive-contract-btn" type="button" data-archive-id="${escapeHtml(item.id)}">归档</button>` : ""}
+      </div>
       <div class="contract-meta">
         <span class="status-pill status-${item.status}">${escapeHtml(item.status_text || item.status)}</span>
         <span>${escapeHtml(item.contract_type || "待识别")}</span>
@@ -1791,6 +1794,12 @@ function renderContractList() {
   `).join("");
   document.querySelectorAll(".contract-item").forEach((node) => {
     node.addEventListener("click", () => selectContract(node.dataset.id));
+  });
+  document.querySelectorAll("[data-archive-id]").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      archiveContract(button.dataset.archiveId).catch((error) => toast(error.message));
+    });
   });
 }
 
@@ -1830,6 +1839,35 @@ async function loadContractDetail(id) {
   const data = await api(`/api/contracts/${id}`);
   renderContract(data.item);
   return data.item;
+}
+
+function clearContractSelection() {
+  state.selectedId = null;
+  state.resultFilter = "all";
+  els.rerunBtn.disabled = true;
+  els.previewTitle.textContent = "请选择一份合同";
+  els.previewSub.textContent = "中间区域用于展示合同正文和审核依据。";
+  els.emptyPreview.classList.remove("hidden");
+  els.previewContent.classList.add("hidden");
+  els.timeline.innerHTML = "";
+  els.riskList.innerHTML = "";
+  els.resultSummary.classList.add("empty-state");
+  els.resultSummary.innerHTML = `<strong>等待选择合同</strong><span>从左侧合同库选择一份合同查看审核结果。</span>`;
+  renderContractList();
+}
+
+async function archiveContract(contractId) {
+  if (!contractId) return;
+  if (!confirm("归档后该合同会从前台合同库移除，后台记录仍会保留。确认归档？")) return;
+  await api(`/api/contracts/${contractId}/archive`, { method: "POST" });
+  toast("合同已归档，前台列表不再展示。");
+  if (state.selectedId === contractId) {
+    state.selectedId = null;
+  }
+  await loadContracts();
+  if (!getVisibleContracts().length) {
+    clearContractSelection();
+  }
 }
 
 function renderContract(contract) {

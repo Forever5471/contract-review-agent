@@ -501,8 +501,11 @@ def agents_reset() -> dict:
 
 
 @app.get("/api/contracts")
-def list_contracts() -> dict:
-    return {"items": [_summarize(item) for item in store.list_contracts()]}
+def list_contracts(include_archived: bool = False) -> dict:
+    contracts = store.list_contracts()
+    if not include_archived:
+        contracts = [item for item in contracts if not item.get("archived")]
+    return {"items": [_summarize(item) for item in contracts]}
 
 
 @app.post("/api/contracts")
@@ -565,6 +568,28 @@ def rerun_review(contract_id: str, background_tasks: BackgroundTasks) -> dict:
     )
     background_tasks.add_task(agent.run, contract_id)
     return {"ok": True}
+
+
+@app.post("/api/contracts/{contract_id}/archive")
+def archive_contract(contract_id: str) -> dict:
+    contract = store.get_contract(contract_id)
+    if not contract:
+        raise HTTPException(status_code=404, detail="Contract not found")
+    updated = store.update_contract(
+        contract_id,
+        archived=True,
+        archived_at=now_iso(),
+    )
+    store.append_event(
+        contract_id,
+        {
+            "phase": "Archive",
+            "event_type": "contract_archived",
+            "message": "合同已归档，前台合同库不再展示，后台记录保留。",
+            "visible_to_user": True,
+        },
+    )
+    return {"ok": True, "item": _summarize(updated)}
 
 
 @app.post("/api/contracts/{contract_id}/human-review")
@@ -781,6 +806,8 @@ def _summarize(contract: dict) -> dict:
         "review_strategy": (contract.get("review_strategy") or {}).get("name", ""),
         "flow_decision": (contract.get("flow_decision") or {}).get("decision", ""),
         "flow_strategy": ((contract.get("flow_decision") or {}).get("flow_strategy") or {}).get("name", ""),
+        "archived": bool(contract.get("archived")),
+        "archived_at": contract.get("archived_at", ""),
         "risk_count": len(risks),
         "p0_count": sum(1 for risk in risks if risk.get("priority") == "P0"),
         "p1_count": sum(1 for risk in risks if risk.get("priority") == "P1"),
